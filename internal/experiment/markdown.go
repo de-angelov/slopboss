@@ -6,15 +6,15 @@ import (
 	"strings"
 )
 
-// ExperimentFileName is the conventional name of the Markdown experiment spec the
-// interactive `experiment groom` session authors at the repo root.
-const ExperimentFileName = "EXPERIMENT.md"
+// EvalFileName is the conventional name of the Markdown eval spec that
+// `eval groom` authors at the repo root.
+const EvalFileName = "EVAL.md"
 
 // MarkdownFormatSpec documents the Markdown experiment format. It is embedded in
 // the grooming prompt (so the Team Lead writes a valid file) and shown in docs.
-const MarkdownFormatSpec = `# Experiment: <short-name>
+const MarkdownFormatSpec = `# Eval: <short-name>
 
-Free-form prose describing the experiment is allowed anywhere and ignored by the
+Free-form prose describing the eval is allowed anywhere and ignored by the
 parser. Structured settings are ` + "`- Key: Value`" + ` bullets.
 
 - Task: <exact backlog task title>      (use Task OR Ticket, not both)
@@ -91,8 +91,11 @@ func parseMarkdownConfig(data string) (ExperimentConfig, error) {
 
 func experimentNameFromHeading(heading string) string {
 	heading = strings.TrimSpace(heading)
-	if k, v, ok := strings.Cut(heading, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "experiment") {
-		return strings.TrimSpace(v)
+	if k, v, ok := strings.Cut(heading, ":"); ok {
+		switch strings.ToLower(strings.TrimSpace(k)) {
+		case "eval", "experiment": // "experiment" kept for backward compatibility
+			return strings.TrimSpace(v)
+		}
 	}
 	return heading
 }

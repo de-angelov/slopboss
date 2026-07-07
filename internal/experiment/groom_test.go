@@ -38,15 +38,15 @@ func TestBuildExperimentGroomPromptLoadsInstructionsBoardAndFormat(t *testing.T)
 		"COMMON RULES MARKER",
 		"TEAM LEAD MARKER",
 		"TECH MARKER",
-		"INTERACTIVE experiment-design session",
-		"Add dark-mode toggle",   // board context is included
-		"EXPERIMENT FILE FORMAT", // the format spec is embedded
-		"## Variants",            // format spec content
-		ExperimentFileName,       // tells the TL which file to write
-		"Do NOT run the experiment",
+		"INTERACTIVE eval-design session",
+		"Add dark-mode toggle", // board context is included
+		"EVAL FILE FORMAT",     // the format spec is embedded
+		"## Variants",          // format spec content
+		EvalFileName,           // tells the TL which file to write
+		"Do NOT run the eval",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("experiment groom prompt missing %q\n%s", want, got)
+			t.Fatalf("eval groom prompt missing %q\n%s", want, got)
 		}
 	}
 }

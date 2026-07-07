@@ -19,7 +19,7 @@ and shutting sessions down as tasks land on `main`.
 [How it works](#-how-it-works) •
 [Commands](#-commands) •
 [The board](#-the-board) •
-[Experiments](#-experiments) •
+[Evals](#-evals) •
 [Architecture](#-architecture)
 
 </div>
@@ -50,7 +50,7 @@ commit** — no database, no hidden state.
 - 🧑‍💻 **A real division of labor** — one Team Lead grooms and prioritizes; N Dev
   Agents execute in parallel, each in its own cloned workspace and branch.
 - 🔌 **Pluggable backends** — run on **Codex** (default) or **Claude Code** with a flag.
-- 🧪 **Built-in experiments** — A/B different models and prompts on the same ticket
+- 🧪 **Built-in evals** — A/B different models and prompts on the same ticket
   in isolated worktrees and get a token/diff report.
 - 📺 **Live TUI** — watch every agent, its current task, status, and token usage in real time.
 - 🛟 **Resilient by design** — merge detection, retry/backoff on failures, and
@@ -103,7 +103,7 @@ slopboss run
 > **Where to run it:** slopboss resolves which board to use in this order —
 > `--dir <board>` if given, else the current directory if it's a board, else the
 > **active board recorded by `setup`** (in `~/.config/slopboss/config.md`). So
-> after `setup`, bare commands like `slopboss experiment groom` work from
+> after `setup`, bare commands like `slopboss eval groom` work from
 > anywhere and print which board they picked; use `--dir` to target a different
 > one.
 
@@ -161,23 +161,23 @@ dependent tasks never get stuck behind a session that was cancelled mid-completi
 | `slopboss setup` | Interactive wizard (like `npm init`): prompts for the board directory, product repo, base branch, dev-agent count, and backend; clones the workspaces, creates the base branch if missing, scaffolds the board files + `CONFIG.md`, then runs an **adaptive tech interview** — the backend asks follow-up questions (slopboss relays each Q&A) and writes `TECH.md`. Any answer given as a flag isn't prompted, so it can run fully non-interactively. |
 | `slopboss run` | Run the autonomous reconcile loop with a live TUI until interrupted. |
 | `slopboss groom` | Launch a one-off **interactive** Team Lead session to capture and prioritize tasks in `BACKLOG.md`. |
-| `slopboss experiment groom` | Design an experiment interactively with the Team Lead, written to `EXPERIMENT.md`. |
-| `slopboss experiment run` | Run the experiment (`EXPERIMENT.md` at the repo root by default; `--config` to override) and produce a report. |
+| `slopboss eval groom` | Design an eval interactively with the Team Lead, written to `EVAL.md`. |
+| `slopboss eval run` | Run the eval (`EVAL.md` at the repo root by default; `--config` to override) and produce a report. |
 | `slopboss version` | Print the slopboss version. |
 
 ### Common flags
 
 | Flag | Commands | Default | Description |
 | --- | --- | --- | --- |
-| `--provider` | `run`, `groom`, `setup`, `experiment run`, `experiment groom` | persisted (`codex`) | Agent backend: `codex` or `claude`. `setup` **persists** your choice to `CONFIG.md`, and the other commands default to it. |
+| `--provider` | `run`, `groom`, `setup`, `eval run`, `eval groom` | persisted (`codex`) | Agent backend: `codex` or `claude`. `setup` **persists** your choice to `CONFIG.md`, and the other commands default to it. |
 | `--dir` | **all commands** (global) | current directory | Board directory to operate in — run any command against a board from anywhere without `cd`. |
 | `--repo` | `setup` | — (prompted) | Product repository to clone into each workspace. |
 | `--ssh-url` | `setup` | `--repo` | Origin URL to set after cloning. |
 | `--branch` | `setup` | `main` (prompted) | Base/integration branch agents target; **created if the repo doesn't have it**, and persisted to `CONFIG.md`. |
 | `--agents` | `setup` | `2` | Number of Dev Agent workspaces to create. |
 | `--skip-interview` | `setup` | `false` | Skip the tech-stack interview; leave a placeholder `TECH.md`. |
-| `--config` | `experiment run` | `EXPERIMENT.md` (repo root) | Override the experiment file to run (`.md` or `.json`). |
-| `--dry-run` | `experiment run` | `false` | Prepare prompts and worktrees without invoking the backend. |
+| `--config` | `eval run` | `EVAL.md` (repo root) | Override the eval file to run (`.md` or `.json`). |
+| `--dry-run` | `eval run` | `false` | Prepare prompts and worktrees without invoking the backend. |
 
 > ℹ️ `slopboss run` discovers how many Dev Agents to drive by counting the
 > `repo-agent-*` workspaces created during `setup`.
@@ -218,7 +218,7 @@ branch and rewrites `TASKS.md`/`ARCHIVE.md` as the final step when the work is d
 
 ---
 
-## 🧪 Experiments
+## 🧪 Evals
 
 Compare models, prompts, **and backends** head-to-head on the same ticket. Each
 variant runs in an **isolated git worktree** so diffs never collide, and slopboss
@@ -228,25 +228,25 @@ You don't hand-write config — **the Team Lead helps you design it**, the same 
 `slopboss groom` curates the backlog:
 
 ```bash
-# 1. Design the experiment interactively; writes EXPERIMENT.md at the repo root
-slopboss experiment groom
+# 1. Design the eval interactively; writes EVAL.md at the repo root
+slopboss eval groom
 
-# 2. Run it — picks up EXPERIMENT.md automatically (dry-run first to preview
+# 2. Run it — picks up EVAL.md automatically (dry-run first to preview
 #    prompts/worktrees without spending tokens)
-slopboss experiment run --dry-run
-slopboss experiment run
+slopboss eval run --dry-run
+slopboss eval run
 
 # Point at a different file only when you want to:
-slopboss experiment run --config experiments/example.md
+slopboss eval run --config evals/example.md
 ```
 
-Experiments are defined in the same human-friendly Markdown as the board.
+Evals are defined in the same human-friendly Markdown as the board.
 Structured settings are `- Key: Value` bullets, each `### section` under
 `## Variants` is one variant, and prose is ignored — so a mistyped key is a real
 error, not a silent no-op:
 
 ```markdown
-# Experiment: codex-vs-claude
+# Eval: codex-vs-claude
 
 - Task: Add dark-mode toggle
 - Prompt mode: bounded
@@ -262,18 +262,18 @@ error, not a silent no-op:
 - Model: claude-sonnet-5
 ```
 
-Experiments run through the same `Provider` abstraction as the orchestrator, so
+Evals run through the same `Provider` abstraction as the orchestrator, so
 either backend works. Provider selection resolves per variant with a clear
 precedence — **variant `Provider` → file `Provider` → `--provider` flag** — so a
 single run can pit Codex against Claude. Token usage and the final-response
 summary are parsed live from each backend's own event stream (codex `--json`,
 Claude `stream-json`); codex-only knobs (`Profile`, `Config`) are ignored by
 Claude. On completion slopboss prints the path to the generated report, e.g.
-`experiments/<run>/report.md`, whose table includes a **Backend** column.
+`evals/<run>/report.md`, whose table includes a **Backend** column.
 
-> JSON configs are still accepted by `experiment run` (`--config foo.json`) for
+> JSON configs are still accepted by `eval run` (`--config foo.json`) for
 > automation; the Markdown format is the authoring default. A ready-to-edit
-> example lives at [`experiments/example.md`](experiments/example.md).
+> example lives at [`evals/example.md`](evals/example.md).
 
 ---
 
@@ -295,7 +295,7 @@ slopboss/
     ├── board/              # Task model, board parsing, queries, merge detection
     ├── provider/           # Codex / Claude backend abstraction + monitors
     ├── prompt/             # cache-friendly prompt assembly
-    ├── experiment/         # model/prompt A/B experiment runner
+    ├── experiment/         # model/prompt A/B eval runner
     ├── orchestrator/       # reconcile loop, scheduler, session lifecycle, groom
     ├── tui/                # live terminal dashboard (implements orchestrator.UI)
     └── setup/              # workspace cloning + board scaffolding

@@ -31,8 +31,8 @@ var rootCmd = &cobra.Command{
 	Long: `slopboss drives a board-based multi-agent development workflow.
 
 It reconciles a markdown task board against running agent sessions (Codex or
-Claude Code), prepares the per-agent workspaces, and runs model/prompt
-experiments.
+Claude Code), prepares the per-agent workspaces, and runs model/prompt/backend
+evals.
 
 By default slopboss operates on the board in the current directory; use --dir to
 point it at a board directory from anywhere.`,
@@ -87,5 +87,5 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&boardDir, "dir", "", "board directory to operate in (default: current directory)")
-	rootCmd.AddCommand(runCmd, groomCmd, setupCmd, experimentCmd, versionCmd)
+	rootCmd.AddCommand(runCmd, groomCmd, setupCmd, evalCmd, versionCmd)
 }

@@ -46,8 +46,8 @@ func TestReadExperimentConfigDefaultsAndResolvesPaths(t *testing.T) {
 	if config.TicketFile != filepath.Join(root, "tickets", "auth.md") {
 		t.Fatalf("TicketFile = %q, want resolved path", config.TicketFile)
 	}
-	if config.OutputDir != filepath.Join(root, "experiments") {
-		t.Fatalf("OutputDir = %q, want default experiments dir", config.OutputDir)
+	if config.OutputDir != filepath.Join(root, "evals") {
+		t.Fatalf("OutputDir = %q, want default evals dir", config.OutputDir)
 	}
 	if config.TimeoutMinutes != 90 {
 		t.Fatalf("TimeoutMinutes = %d, want 90", config.TimeoutMinutes)

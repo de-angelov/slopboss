@@ -166,7 +166,7 @@ func ReadConfig(path string) (ExperimentConfig, error) {
 		return ExperimentConfig{}, fmt.Errorf("orchestrator-dev promptRole must be %q or %q", cfg.DevAgent1Role, cfg.DevAgent2Role)
 	}
 	if config.OutputDir == "" {
-		config.OutputDir = filepath.Join(cfg.RepoRoot, "experiments")
+		config.OutputDir = filepath.Join(cfg.RepoRoot, "evals")
 	} else if !filepath.IsAbs(config.OutputDir) {
 		config.OutputDir = filepath.Join(cfg.RepoRoot, config.OutputDir)
 	}
@@ -221,7 +221,7 @@ func variantProvider(config ExperimentConfig, variant ExperimentVariant, default
 
 func (config ExperimentConfig) ResolvedOutputDir() string {
 	if config.OutputDir == "" {
-		return filepath.Join(cfg.RepoRoot, "experiments")
+		return filepath.Join(cfg.RepoRoot, "evals")
 	}
 	return config.OutputDir
 }
@@ -669,7 +669,7 @@ func writeExperimentReports(runDir string, run ExperimentRun) error {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Experiment: %s\n\n", run.Name)
+	fmt.Fprintf(&b, "# Eval: %s\n\n", run.Name)
 	fmt.Fprintf(&b, "- Base branch: `%s`\n", run.BaseBranch)
 	fmt.Fprintf(&b, "- Base commit: `%s`\n", run.BaseCommit)
 	fmt.Fprintf(&b, "- Ticket: `%s`\n", run.TicketFile)
