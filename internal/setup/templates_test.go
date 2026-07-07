@@ -69,6 +69,24 @@ func TestScaffoldBoardFilesCreatesMissingAndKeepsExisting(t *testing.T) {
 	}
 }
 
+func TestAgentsTemplateIsGenericAndCountAware(t *testing.T) {
+	got := agentsTemplate(3)
+	for i := 1; i <= 3; i++ {
+		if !strings.Contains(got, "Dev Agent "+itoa(i)) {
+			t.Fatalf("AGENTS.md missing role Dev Agent %d:\n%s", i, got)
+		}
+		if !strings.Contains(got, "workspaces/repo-agent-"+itoa(i)) {
+			t.Fatalf("AGENTS.md missing workspace for agent %d", i)
+		}
+	}
+	if strings.Contains(got, "Dev Agent 4") {
+		t.Fatal("AGENTS.md leaked a 4th agent for a 3-agent setup")
+	}
+	if strings.Contains(got, "agent-framework") {
+		t.Fatal("AGENTS.md default must not carry the source repo name")
+	}
+}
+
 func itoa(n int) string {
 	return string(rune('0' + n))
 }

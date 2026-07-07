@@ -18,9 +18,10 @@ func TestWorkspaceDirs(t *testing.T) {
 }
 
 func TestOptionsDefaults(t *testing.T) {
-	o := Options{}.withDefaults()
-	if o.RepoURL != DefaultRepoURL || o.RepoSSHURL != DefaultRepoSSHURL {
-		t.Fatalf("default URLs not applied: %+v", o)
+	// RepoSSHURL defaults to RepoURL, and DevAgents defaults to DefaultDevAgents.
+	o := Options{RepoURL: "git@example.com:acme/app.git"}.withDefaults()
+	if o.RepoSSHURL != o.RepoURL {
+		t.Fatalf("RepoSSHURL should default to RepoURL: %+v", o)
 	}
 	if o.DevAgents != DefaultDevAgents {
 		t.Fatalf("DevAgents default = %d, want %d", o.DevAgents, DefaultDevAgents)
@@ -28,5 +29,10 @@ func TestOptionsDefaults(t *testing.T) {
 
 	if got := (Options{DevAgents: 4}).withDefaults().DevAgents; got != 4 {
 		t.Fatalf("explicit DevAgents overridden: got %d, want 4", got)
+	}
+
+	// An explicit SSH URL is preserved.
+	if o := (Options{RepoURL: "https://x/y", RepoSSHURL: "git@x:y.git"}).withDefaults(); o.RepoSSHURL != "git@x:y.git" {
+		t.Fatalf("explicit RepoSSHURL overridden: %+v", o)
 	}
 }

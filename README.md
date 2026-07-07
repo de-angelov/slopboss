@@ -83,8 +83,9 @@ go build -o slopboss ./cmd/slopboss
 ## 🚀 Quickstart
 
 ```bash
-# 1. Scaffold the board files and clone per-agent workspaces
-#    (creates repo-tl + repo-agent-1..N under ./workspaces)
+# 1. Scaffold the board files, clone per-agent workspaces (repo-tl +
+#    repo-agent-1..N), and interview the Team Lead about your stack -> TECH.md.
+#    Add --skip-interview for a non-interactive/CI setup.
 slopboss setup --repo https://github.com/you/your-product --agents 2
 
 # 2. Add and prioritize work with an interactive Team Lead session
@@ -148,7 +149,7 @@ dependent tasks never get stuck behind a session that was cancelled mid-completi
 
 | Command | What it does |
 | --- | --- |
-| `slopboss setup` | Clone/refresh the Team Lead (`repo-tl`) and `N` Dev Agent (`repo-agent-1..N`) workspaces under `workspaces/`, and scaffold starter board files. |
+| `slopboss setup` | Clone/refresh the Team Lead (`repo-tl`) and `N` Dev Agent (`repo-agent-1..N`) workspaces under `workspaces/`, scaffold the board files, then run an interactive Team Lead tech-stack interview that writes `TECH.md` (skip with `--skip-interview`). |
 | `slopboss run` | Run the autonomous reconcile loop with a live TUI until interrupted. |
 | `slopboss groom` | Launch a one-off **interactive** Team Lead session to capture and prioritize tasks in `BACKLOG.md`. |
 | `slopboss experiment groom` | Design an experiment interactively with the Team Lead, written to `EXPERIMENT.md`. |
@@ -159,10 +160,11 @@ dependent tasks never get stuck behind a session that was cancelled mid-completi
 
 | Flag | Commands | Default | Description |
 | --- | --- | --- | --- |
-| `--provider` | `run`, `groom`, `experiment run`, `experiment groom` | `codex` | Agent backend: `codex` or `claude`. For `experiment run` it is the default; the config and each variant can override it. |
-| `--repo` | `setup` | — | Product repo HTTPS URL to clone into each workspace. |
-| `--ssh-url` | `setup` | — | Origin SSH URL to set after cloning. |
+| `--provider` | `run`, `groom`, `setup`, `experiment run`, `experiment groom` | `codex` | Agent backend: `codex` or `claude`. For `experiment run` it is the default; the config and each variant can override it. |
+| `--repo` | `setup` | — (**required**) | Product repository to clone into each workspace. Prompted if omitted. |
+| `--ssh-url` | `setup` | `--repo` | Origin URL to set after cloning. |
 | `--agents` | `setup` | `2` | Number of Dev Agent workspaces to create. |
+| `--skip-interview` | `setup` | `false` | Skip the tech-stack interview; leave a placeholder `TECH.md`. |
 | `--config` | `experiment run` | — | Path to the experiment config (`EXPERIMENT.md` or `.json`). |
 | `--dry-run` | `experiment run` | `false` | Prepare prompts and worktrees without invoking the backend. |
 
