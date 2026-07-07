@@ -1,0 +1,13 @@
+# Compiled binary
+/slopboss
+
+# Runtime output
+logs/
+workspaces/
+
+# Go build/test artifacts
+*.out
+*.test
+
+# Editor / OS cruft
+.DS_Store
