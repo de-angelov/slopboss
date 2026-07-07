@@ -35,4 +35,12 @@ func TestOptionsDefaults(t *testing.T) {
 	if o := (Options{RepoURL: "https://x/y", RepoSSHURL: "git@x:y.git"}).withDefaults(); o.RepoSSHURL != "git@x:y.git" {
 		t.Fatalf("explicit RepoSSHURL overridden: %+v", o)
 	}
+
+	// BaseBranch defaults to main, and an explicit value is preserved.
+	if o := (Options{RepoURL: "x"}).withDefaults(); o.BaseBranch != "main" {
+		t.Fatalf("BaseBranch default = %q, want main", o.BaseBranch)
+	}
+	if o := (Options{RepoURL: "x", BaseBranch: "develop"}).withDefaults(); o.BaseBranch != "develop" {
+		t.Fatalf("explicit BaseBranch overridden: %q", o.BaseBranch)
+	}
 }

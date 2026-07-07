@@ -3,7 +3,6 @@ package main
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/de-angelov/slopboss/internal/config"
 	"github.com/de-angelov/slopboss/internal/orchestrator"
 	"github.com/de-angelov/slopboss/internal/tui"
 )
@@ -18,10 +17,10 @@ agent sessions, and start/stop backend sessions to match. Runs until
 interrupted (SIGINT/SIGTERM), then cancels in-flight sessions and exits.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return orchestrator.RunLoop(cmd.Context(), runProvider, tui.New())
+		return orchestrator.RunLoop(cmd.Context(), providerOrConfigured(runProvider), tui.New())
 	},
 }
 
 func init() {
-	runCmd.Flags().StringVar(&runProvider, "provider", config.DefaultProviderName, "agent backend to use: codex or claude")
+	runCmd.Flags().StringVar(&runProvider, "provider", "", "agent backend: codex or claude (default: configured provider)")
 }

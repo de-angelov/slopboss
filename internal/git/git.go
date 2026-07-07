@@ -89,10 +89,10 @@ func PrepareBranch(workspace string, branch string) error {
 		return RunGitChecked(workspace, "checkout", "-B", branch, remoteRef)
 	}
 
-	if err := RunGitChecked(workspace, "checkout", "main"); err != nil {
+	if err := RunGitChecked(workspace, "checkout", config.BaseBranch); err != nil {
 		return err
 	}
-	if err := RunGitChecked(workspace, "pull", "--rebase", "origin", "main"); err != nil {
+	if err := RunGitChecked(workspace, "pull", "--rebase", "origin", config.BaseBranch); err != nil {
 		return err
 	}
 	if err := RunGitChecked(workspace, "checkout", "-b", branch); err != nil {
@@ -174,7 +174,7 @@ func mergeInProgress(workspace string) bool {
 // an in-flight session's git operations. Returns nil on any git error (e.g. the
 // ref was never fetched), so callers treat "unknown" as "nothing merged".
 func MainCommitSubjects(workspace string, limit int) []string {
-	out, err := GitOutput(workspace, "log", "origin/main", fmt.Sprintf("-n%d", limit), "--format=%s")
+	out, err := GitOutput(workspace, "log", "origin/"+config.BaseBranch, fmt.Sprintf("-n%d", limit), "--format=%s")
 	if err != nil {
 		return nil
 	}

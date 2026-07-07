@@ -3,7 +3,6 @@ package main
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/de-angelov/slopboss/internal/config"
 	"github.com/de-angelov/slopboss/internal/orchestrator"
 	"github.com/de-angelov/slopboss/internal/provider"
 )
@@ -19,7 +18,7 @@ and prioritize new tasks in BACKLOG.md. This is a one-off grooming session,
 separate from the autonomous "run" loop.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		p, err := provider.ByName(groomProvider)
+		p, err := provider.ByName(providerOrConfigured(groomProvider))
 		if err != nil {
 			return err
 		}
@@ -28,5 +27,5 @@ separate from the autonomous "run" loop.`,
 }
 
 func init() {
-	groomCmd.Flags().StringVar(&groomProvider, "provider", config.DefaultProviderName, "agent backend to use: codex or claude")
+	groomCmd.Flags().StringVar(&groomProvider, "provider", "", "agent backend: codex or claude (default: configured provider)")
 }

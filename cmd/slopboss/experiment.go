@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
-	"github.com/de-angelov/slopboss/internal/config"
 	"github.com/de-angelov/slopboss/internal/experiment"
 	"github.com/de-angelov/slopboss/internal/provider"
 )
@@ -34,21 +34,26 @@ var experimentRunCmd = &cobra.Command{
 worktree, run the configured backend against the ticket prompt, and collect
 token/diff metrics into a report.
 
-The config may be Markdown (EXPERIMENT.md, the format "experiment groom" writes)
-or JSON. The backend defaults to --provider, but the config and each variant may
-override it, so a single run can compare codex against claude.`,
+By default it runs the EXPERIMENT.md at the repo root (the file "experiment
+groom" writes); pass --config only to run a different file. The config may be
+Markdown or JSON. The backend defaults to --provider, but the config and each
+variant may override it, so a single run can compare codex against claude.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if experimentConfig == "" {
-			return fmt.Errorf("--config is required (e.g. --config %s)", experiment.ExperimentFileName)
+		configPath := experimentConfig
+		if configPath == "" {
+			configPath = experiment.ExperimentFilePath()
+			if _, err := os.Stat(configPath); err != nil {
+				return fmt.Errorf("no experiment at %s — create one with 'slopboss experiment groom', or pass --config <file>", configPath)
+			}
 		}
 
-		cfg, err := experiment.ReadConfig(experimentConfig)
+		cfg, err := experiment.ReadConfig(configPath)
 		if err != nil {
 			return fmt.Errorf("experiment config error: %w", err)
 		}
 
-		run, err := experiment.Run(cmd.Context(), cfg, experimentProvider, experimentDryRun)
+		run, err := experiment.Run(cmd.Context(), cfg, providerOrConfigured(experimentProvider), experimentDryRun)
 		if err != nil {
 			return fmt.Errorf("experiment failed: %w", err)
 		}
@@ -70,7 +75,7 @@ capture it in EXPERIMENT.md — the same way "slopboss groom" curates the backlo
 This only authors the experiment file; run it afterwards with "experiment run".`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		p, err := provider.ByName(experimentGroomProvider)
+		p, err := provider.ByName(providerOrConfigured(experimentGroomProvider))
 		if err != nil {
 			return err
 		}
@@ -79,11 +84,11 @@ This only authors the experiment file; run it afterwards with "experiment run".`
 }
 
 func init() {
-	experimentRunCmd.Flags().StringVar(&experimentConfig, "config", "", "path to experiment config (EXPERIMENT.md or .json)")
-	experimentRunCmd.Flags().StringVar(&experimentProvider, "provider", config.DefaultProviderName, "default agent backend for variants: codex or claude")
+	experimentRunCmd.Flags().StringVar(&experimentConfig, "config", "", "experiment config to run; defaults to EXPERIMENT.md at the repo root")
+	experimentRunCmd.Flags().StringVar(&experimentProvider, "provider", "", "default agent backend for variants: codex or claude (default: configured provider)")
 	experimentRunCmd.Flags().BoolVar(&experimentDryRun, "dry-run", false, "prepare prompts and worktrees without running the backend")
 
-	experimentGroomCmd.Flags().StringVar(&experimentGroomProvider, "provider", config.DefaultProviderName, "agent backend to use: codex or claude")
+	experimentGroomCmd.Flags().StringVar(&experimentGroomProvider, "provider", "", "agent backend: codex or claude (default: configured provider)")
 
 	experimentCmd.AddCommand(experimentRunCmd, experimentGroomCmd)
 }

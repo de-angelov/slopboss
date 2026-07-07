@@ -17,7 +17,7 @@ import (
 
 // DefaultDevAgents is the number of dev-agent workspaces created when the count
 // is not specified.
-const DefaultDevAgents = 2
+const DefaultDevAgents = config.DefaultDevAgents
 
 // Options configures a setup run.
 type Options struct {
@@ -35,6 +35,13 @@ type Options struct {
 	// DevAgents is the number of dev-agent workspaces (repo-agent-1..N) to
 	// create, in addition to the single team-lead workspace.
 	DevAgents int
+	// BaseBranch is the product integration branch dev agents branch from and
+	// merge into. It is persisted to CONFIG.md and created on the remote if
+	// missing. Defaults to "main".
+	BaseBranch string
+	// Provider is the default agent backend (codex/claude) persisted to CONFIG.md
+	// so run/groom/experiment default to it without a flag.
+	Provider string
 	// Interview, when set, is the backend used for the interactive tech-stack
 	// discovery session. Nil skips the interview and leaves the placeholder
 	// TECH.md in place.
@@ -47,6 +54,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.DevAgents < 1 {
 		o.DevAgents = DefaultDevAgents
+	}
+	if strings.TrimSpace(o.BaseBranch) == "" {
+		o.BaseBranch = "main"
 	}
 	return o
 }
@@ -72,17 +82,31 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("setup: a product repository (--repo) is required")
 	}
 
+	if opts.BoardRoot != "" && isSlopbossSourceTree(opts.BoardRoot) {
+		return fmt.Errorf("refusing to scaffold into the slopboss source tree (%s) — run setup from a separate orchestrator/board directory", opts.BoardRoot)
+	}
+
 	fmt.Println("Setting up AI development workflow...")
 	fmt.Println("Product repo:", opts.RepoURL)
+	fmt.Println("Base branch:", opts.BaseBranch)
 	fmt.Println("Workspaces:", opts.WorkspacesRoot)
 	fmt.Printf("Dev agents: %d\n", opts.DevAgents)
 
 	if opts.BoardRoot != "" {
 		fmt.Println()
 		fmt.Println("Board files:", opts.BoardRoot)
-		if _, err := scaffoldBoardFiles(opts.BoardRoot, opts.DevAgents); err != nil {
+		if _, err := scaffoldBoardFiles(opts.BoardRoot, opts.DevAgents, opts.BaseBranch); err != nil {
 			return err
 		}
+		if err := config.SaveSettings(config.Settings{
+			RepoURL:    opts.RepoURL,
+			BaseBranch: opts.BaseBranch,
+			Provider:   opts.Provider,
+			DevAgents:  opts.DevAgents,
+		}); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+		fmt.Println("✓ create:", filepath.Base(config.ConfigFilePath()))
 		fmt.Println()
 	}
 
@@ -180,6 +204,14 @@ func createClone(opts Options, dir string) error {
 	path := filepath.Join(opts.WorkspacesRoot, dir)
 
 	if _, err := os.Stat(path); err == nil {
+		// Reuse an existing workspace only if it points at the requested repo;
+		// otherwise it is a stale clone from a previous product and reusing it
+		// silently would run agents against the wrong code.
+		if origin, err := gitOutput(path, "remote", "get-url", "origin"); err == nil {
+			if got := strings.TrimSpace(origin); got != opts.RepoURL && got != opts.RepoSSHURL {
+				return fmt.Errorf("workspace %s already exists but its origin is %s, not %s — remove %s and re-run", dir, got, opts.RepoURL, path)
+			}
+		}
 		fmt.Println("• exists:", dir)
 	} else {
 		if err := run(opts.WorkspacesRoot, "git", "clone", opts.RepoURL, dir); err != nil {
@@ -191,7 +223,7 @@ func createClone(opts Options, dir string) error {
 	if err := ensureSSHRemote(path, opts.RepoSSHURL); err != nil {
 		return err
 	}
-	if err := ensureMainBranch(path); err != nil {
+	if err := ensureBaseBranch(path, opts.BaseBranch); err != nil {
 		return err
 	}
 	return removeWorkspaceTaskBoard(path)
@@ -205,20 +237,110 @@ func ensureSSHRemote(repoPath, sshURL string) error {
 	return nil
 }
 
-func ensureMainBranch(repoPath string) error {
-	steps := [][]string{
-		{"fetch", "origin", "main"},
-		{"remote", "set-head", "origin", "main"},
-		{"checkout", "main"},
-		{"branch", "--set-upstream-to", "origin/main", "main"},
+// ensureBaseBranch makes sure the product repo has the chosen base branch and the
+// workspace is on it. If the branch does not exist on origin it is created: an
+// empty repo gets a clean initial commit, and a non-empty repo branches from what
+// was cloned. Dev-agent branching, squash-merges, and merge detection all target
+// this branch.
+func ensureBaseBranch(repoPath, branch string) error {
+	branchRef, err := gitOutput(repoPath, "ls-remote", "--heads", "origin", branch)
+	if err != nil {
+		return fmt.Errorf("cannot reach the product repository's origin (check the URL and your git access): %w", err)
 	}
+
+	if strings.TrimSpace(branchRef) == "" {
+		if err := createBaseBranch(repoPath, branch); err != nil {
+			return err
+		}
+	} else if err := checkoutBaseBranch(repoPath, branch); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// createBaseBranch creates and pushes the base branch. For an empty remote it
+// requires an empty local clone too (guarding against pushing a stale workspace's
+// unrelated history), and seeds a clean initial commit; for a non-empty remote it
+// branches from whatever was cloned.
+func createBaseBranch(repoPath, branch string) error {
+	remoteEmpty := false
+	if refs, _ := gitOutput(repoPath, "ls-remote", "origin"); strings.TrimSpace(refs) == "" {
+		remoteEmpty = true
+	}
+
+	_, headErr := gitOutput(repoPath, "rev-parse", "--verify", "HEAD")
+	hasLocalCommits := headErr == nil
+
+	if remoteEmpty {
+		if hasLocalCommits {
+			return fmt.Errorf("%s has local commits but origin is empty — remove the workspace and re-run so setup can initialize %q cleanly", repoPath, branch)
+		}
+		fmt.Printf("• product repo is empty; initializing %q\n", branch)
+		steps := [][]string{
+			{"checkout", "-B", branch},
+			{"commit", "--allow-empty", "-m", "chore: initialize repository"},
+			{"push", "-u", "origin", branch},
+		}
+		if err := runSteps(repoPath, steps); err != nil {
+			return err
+		}
+		fmt.Println("✓ created base branch:", branch)
+		return nil
+	}
+
+	// Remote has history but not this branch: create it from the cloned HEAD.
+	fmt.Printf("• branch %q not found on origin; creating it from the cloned HEAD\n", branch)
+	steps := [][]string{
+		{"checkout", "-B", branch},
+		{"push", "-u", "origin", branch},
+	}
+	if err := runSteps(repoPath, steps); err != nil {
+		return err
+	}
+	fmt.Println("✓ created base branch:", branch)
+	return nil
+}
+
+func checkoutBaseBranch(repoPath, branch string) error {
+	steps := [][]string{
+		{"fetch", "origin", branch},
+		{"remote", "set-head", "origin", branch},
+		{"checkout", branch},
+		{"branch", "--set-upstream-to", "origin/" + branch, branch},
+	}
+	if err := runSteps(repoPath, steps); err != nil {
+		return err
+	}
+	fmt.Println("✓ base branch:", branch)
+	return nil
+}
+
+func runSteps(repoPath string, steps [][]string) error {
 	for _, args := range steps {
 		if err := run(repoPath, "git", args...); err != nil {
 			return err
 		}
 	}
-	fmt.Println("✓ default branch: main")
 	return nil
+}
+
+// gitOutput runs a git command in dir and returns its stdout.
+func gitOutput(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	return string(out), err
+}
+
+// isSlopbossSourceTree reports whether dir is the slopboss tool's own source
+// checkout, so setup can refuse to scaffold board files into it.
+func isSlopbossSourceTree(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "module github.com/de-angelov/slopboss")
 }
 
 func removeWorkspaceTaskBoard(repoPath string) error {

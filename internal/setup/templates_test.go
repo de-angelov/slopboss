@@ -28,7 +28,7 @@ func TestScaffoldBoardFilesCreatesMissingAndKeepsExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := scaffoldBoardFiles(root, 2)
+	created, err := scaffoldBoardFiles(root, 2, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestScaffoldBoardFilesCreatesMissingAndKeepsExisting(t *testing.T) {
 	}
 
 	// A second run creates nothing new (idempotent).
-	created2, err := scaffoldBoardFiles(root, 2)
+	created2, err := scaffoldBoardFiles(root, 2, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +84,16 @@ func TestAgentsTemplateIsGenericAndCountAware(t *testing.T) {
 	}
 	if strings.Contains(got, "agent-framework") {
 		t.Fatal("AGENTS.md default must not carry the source repo name")
+	}
+}
+
+func TestDevAgentTemplateUsesBaseBranch(t *testing.T) {
+	got := devAgentTemplate("develop")
+	if !strings.Contains(got, "squash-merged into product develop") {
+		t.Fatalf("DEV_AGENT.md should reference the base branch 'develop':\n%s", got)
+	}
+	if strings.Contains(got, "product main") {
+		t.Fatalf("DEV_AGENT.md leaked 'main' when base branch is develop:\n%s", got)
 	}
 }
 

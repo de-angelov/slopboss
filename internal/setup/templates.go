@@ -42,8 +42,6 @@ Completed work history. Normal orchestrator prompts do not load this file.
 ## Done
 `,
 
-	"DEV_AGENT.md": devAgentTemplate,
-
 	"TEAM_LEAD_AGENT.md": teamLeadTemplate,
 
 	"TECH.md": `# TECH
@@ -93,6 +91,7 @@ Common rules for all roles in this workflow.
 - DEV_AGENT.md: dev agent role rules.
 - TEAM_LEAD_AGENT.md: team lead agent role rules.
 - TECH.md: product technical standards and verification.
+- CONFIG.md: slopboss configuration (base branch, etc.).
 
 ## Roles
 
@@ -160,8 +159,10 @@ Instructions apply in this order:
 `, roles.String(), workspaces.String())
 }
 
-// devAgentTemplate is the genericized Dev Agent role file (any Dev Agent N).
-const devAgentTemplate = `# Dev Agent Role Instructions
+// devAgentTemplate is the genericized Dev Agent role file (any Dev Agent N),
+// parameterized by the product's base/integration branch.
+func devAgentTemplate(baseBranch string) string {
+	return fmt.Sprintf(`# Dev Agent Role Instructions
 
 Applies to every Dev Agent role.
 
@@ -173,7 +174,7 @@ Applies to every Dev Agent role.
 - Run verification defined in TECH.md.
 - Commit focused changes.
 - Push the assigned branch.
-- Squash-merge completed work into product main.
+- Squash-merge completed work into product %[1]s.
 - Move completed merged work from TASKS.md to ARCHIVE.md.
 
 ## Restrictions
@@ -190,7 +191,7 @@ Dev agents must never:
 ## Git Workflow
 
 Each dev-agent task uses its own branch, e.g. agent/<n>/<short-slug>. Completed
-task branches must be squash-merged into product main so main receives one final
+task branches must be squash-merged into product %[1]s so %[1]s receives one final
 commit per task.
 
 ## Completion Workflow
@@ -200,8 +201,8 @@ Before marking work complete:
 1. Run relevant verification from TECH.md.
 2. Commit focused changes.
 3. Push the task branch.
-4. Squash-merge the completed branch into product main.
-5. Push product main.
+4. Squash-merge the completed branch into product %[1]s.
+5. Push product %[1]s.
 6. Record verification and merge notes in the task.
 7. Move the completed task from TASKS.md to ARCHIVE.md.
 8. Set Status: Done.
@@ -225,7 +226,8 @@ If verification fails outside the assigned task scope:
 
 After the blocker is fixed and merged, the Team Lead Agent returns the original
 task to Status: In Progress.
-`
+`, baseBranch)
+}
 
 // teamLeadTemplate is the genericized Team Lead role file (CONTEXT.md/ADR
 // references trimmed since those files are not part of the board set).
@@ -353,12 +355,13 @@ func tasksTemplate(devAgents int) string {
 
 // scaffoldBoardFiles writes any missing root board/config files under root
 // without overwriting existing ones. It returns the names of files it created.
-func scaffoldBoardFiles(root string, devAgents int) ([]string, error) {
-	files := make(map[string]string, len(boardTemplates)+2)
+func scaffoldBoardFiles(root string, devAgents int, baseBranch string) ([]string, error) {
+	files := make(map[string]string, len(boardTemplates)+3)
 	for name, content := range boardTemplates {
 		files[name] = content
 	}
 	files["AGENTS.md"] = agentsTemplate(devAgents)
+	files["DEV_AGENT.md"] = devAgentTemplate(baseBranch)
 	files["TASKS.md"] = tasksTemplate(devAgents)
 
 	names := make([]string, 0, len(files))

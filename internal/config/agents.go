@@ -8,11 +8,11 @@ import (
 	"strings"
 )
 
-// DevAgentCount is the number of dev-agent lanes the loop manages. It defaults
-// to 2 (backward-compatible for tests and the historical layout); the run
-// command derives the real value from the repo-agent-* workspaces at startup via
+// DevAgentCount is the number of dev-agent lanes the loop manages. It is seeded
+// from CONFIG.md (falling back to DefaultDevAgents); the run command then derives
+// the authoritative value from the repo-agent-* workspaces at startup via
 // DiscoverDevAgentCount.
-var DevAgentCount = 2
+var DevAgentCount = loadDevAgents()
 
 const (
 	DevAgentRolePrefix = "Dev Agent "

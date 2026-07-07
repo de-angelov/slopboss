@@ -36,15 +36,19 @@ func Groom(ctx context.Context, p provider.Provider) error {
 	promptText := buildExperimentGroomPrompt(tasks)
 	model := p.DefaultModel(cfg.TeamLeadRole)
 
+	// Run at the repo root so the agent writes EXPERIMENT.md alongside the other
+	// board files (BACKLOG.md, TASKS.md, …), and can inspect ./workspaces/repo-tl
+	// for product context. This is where "experiment run --config EXPERIMENT.md"
+	// looks for it.
 	cmd := p.InteractiveCommand(ctx, model, promptText)
-	cmd.Dir = cfg.TeamLeadPath
+	cmd.Dir = cfg.RepoRoot
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	fmt.Printf("Starting %s experiment grooming session in %s\n", p.Name(), cfg.TeamLeadPath)
-	fmt.Printf("The Team Lead will help you write %s; then run it with:\n  slopboss experiment run --config %s\n",
-		ExperimentFileName, ExperimentFileName)
+	fmt.Printf("Starting %s experiment grooming session in %s\n", p.Name(), cfg.RepoRoot)
+	fmt.Printf("The Team Lead will write %s; then run it with:\n  slopboss experiment run --config %s\n",
+		ExperimentFilePath(), ExperimentFileName)
 	return cmd.Run()
 }
 
@@ -77,23 +81,27 @@ func buildExperimentGroomPrompt(tasks []board.Task) string {
 
 ================ EXPERIMENT FILE FORMAT ================
 
-Write the experiment to %s at the repository root using EXACTLY this Markdown
-format (structured settings are "- Key: Value" bullets; prose is allowed and
-ignored by the parser):
+Your current working directory is the repository root — it already contains the
+board files (BACKLOG.md, TASKS.md, ARCHIVE.md, AGENTS.md, TECH.md, …) and a
+workspaces/ directory. Write the experiment to ./%s HERE, alongside those board
+files (do NOT put it under workspaces/). Use EXACTLY this Markdown format
+(structured settings are "- Key: Value" bullets; prose is allowed and ignored by
+the parser):
 
 %s
 
 ================ EXPERIMENT DESIGN SESSION ================
 
 Work interactively with the user to design a model/prompt/backend experiment and
-capture it in %s:
+capture it in ./%s:
 - Pick the task to test: reference an existing backlog task by its exact title
   (Task:) or point at a ticket file (Ticket:). Do NOT invent work not on the board
-  without confirming with the user.
+  without confirming with the user. You MAY read ./workspaces/repo-tl for product
+  context, but do not modify anything under workspaces/.
 - Propose 2+ variants that isolate ONE difference each (e.g. codex vs claude, or
   two models, or two prompt files) so the results are comparable.
 - Only set codex-only fields (Profile, Config) on codex variants.
-- Do NOT run the experiment or implement the task; only write %s.
+- Do NOT run the experiment or implement the task; only write ./%s.
 - Begin by asking the user which task they want to test and what they want to
   compare.
 `, common, teamLead, tech, boardContext, ExperimentFileName, MarkdownFormatSpec, ExperimentFileName, ExperimentFileName)

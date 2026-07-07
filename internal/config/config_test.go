@@ -3,9 +3,63 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestSettingsRoundTripInMarkdown(t *testing.T) {
+	oldRoot, oldBranch, oldProvider, oldRepo, oldAgents := RepoRoot, BaseBranch, Provider, RepoURL, DevAgentCount
+	RepoRoot = t.TempDir()
+	t.Cleanup(func() {
+		RepoRoot, BaseBranch, Provider, RepoURL, DevAgentCount = oldRoot, oldBranch, oldProvider, oldRepo, oldAgents
+	})
+
+	// Config is Markdown, not JSON.
+	if filepath.Ext(ConfigFilePath()) != ".md" {
+		t.Fatalf("config file must be markdown, got %s", ConfigFilePath())
+	}
+
+	if err := SaveSettings(Settings{
+		RepoURL:    "git@github.com:acme/app.git",
+		BaseBranch: "develop",
+		Provider:   "claude",
+		DevAgents:  3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(ConfigFilePath())
+	for _, want := range []string{
+		"- Product repo: git@github.com:acme/app.git",
+		"- Base branch: develop",
+		"- Provider: claude",
+		"- Dev agents: 3",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("CONFIG.md missing %q:\n%s", want, data)
+		}
+	}
+	if strings.Contains(string(data), "{") {
+		t.Fatalf("CONFIG.md must not be JSON:\n%s", data)
+	}
+	if loadBaseBranch() != "develop" || loadProvider() != "claude" || loadDevAgents() != 3 {
+		t.Fatalf("reload mismatch: branch=%q provider=%q agents=%d", loadBaseBranch(), loadProvider(), loadDevAgents())
+	}
+	if settingOr("product repo", "") != "git@github.com:acme/app.git" {
+		t.Fatalf("repo not persisted: %q", settingOr("product repo", ""))
+	}
+	if BaseBranch != "develop" || Provider != "claude" || RepoURL == "" || DevAgentCount != 3 {
+		t.Fatalf("in-process values not updated: branch=%q provider=%q repo=%q agents=%d", BaseBranch, Provider, RepoURL, DevAgentCount)
+	}
+
+	// Blanks fall back to their defaults.
+	if err := SaveSettings(Settings{}); err != nil {
+		t.Fatal(err)
+	}
+	if loadBaseBranch() != "main" || loadProvider() != DefaultProviderName || loadDevAgents() != DefaultDevAgents {
+		t.Fatalf("defaults not applied: branch=%q provider=%q agents=%d", loadBaseBranch(), loadProvider(), loadDevAgents())
+	}
+}
 
 func TestResolveRepoRootFromCurrentRoot(t *testing.T) {
 	root := makeRepoRoot(t)

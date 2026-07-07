@@ -83,10 +83,12 @@ go build -o slopboss ./cmd/slopboss
 ## 🚀 Quickstart
 
 ```bash
-# 1. Scaffold the board files, clone per-agent workspaces (repo-tl +
-#    repo-agent-1..N), and interview the Team Lead about your stack -> TECH.md.
-#    Add --skip-interview for a non-interactive/CI setup.
-slopboss setup --repo https://github.com/you/your-product --agents 2
+# 1. Run the setup wizard — it prompts for the board directory, product repo,
+#    base branch, dev-agent count, and backend, then clones workspaces, creates
+#    the base branch if missing, scaffolds the board, and interviews the Team
+#    Lead about your stack -> TECH.md. Pass any answer as a flag to skip its
+#    prompt (e.g. --repo ... --agents 2 --skip-interview for CI).
+slopboss setup
 
 # 2. Add and prioritize work with an interactive Team Lead session
 slopboss groom
@@ -97,6 +99,11 @@ slopboss run
 
 `run` opens a live TUI and keeps working until you press `Ctrl-C` (or send
 `SIGTERM`), at which point it cancels in-flight sessions and exits cleanly.
+
+> **Where to run it:** every command operates on the board in the current
+> directory (found by walking up for the board files). Run commands from inside
+> your board directory, or point at it from anywhere with the global `--dir`:
+> `slopboss --dir ~/my-board experiment groom`.
 
 Switch backends at any time:
 
@@ -149,23 +156,25 @@ dependent tasks never get stuck behind a session that was cancelled mid-completi
 
 | Command | What it does |
 | --- | --- |
-| `slopboss setup` | Clone/refresh the Team Lead (`repo-tl`) and `N` Dev Agent (`repo-agent-1..N`) workspaces under `workspaces/`, scaffold the board files, then run an interactive Team Lead tech-stack interview that writes `TECH.md` (skip with `--skip-interview`). |
+| `slopboss setup` | Interactive wizard (like `npm init`): prompts for the board directory, product repo, base branch, dev-agent count, and backend; clones the workspaces, creates the base branch if missing, scaffolds the board files + `CONFIG.md`, and runs the Team Lead tech-stack interview. Any answer given as a flag isn't prompted, so it can run fully non-interactively. |
 | `slopboss run` | Run the autonomous reconcile loop with a live TUI until interrupted. |
 | `slopboss groom` | Launch a one-off **interactive** Team Lead session to capture and prioritize tasks in `BACKLOG.md`. |
 | `slopboss experiment groom` | Design an experiment interactively with the Team Lead, written to `EXPERIMENT.md`. |
-| `slopboss experiment run` | Run an experiment from a config (`EXPERIMENT.md` or JSON) and produce a report. |
+| `slopboss experiment run` | Run the experiment (`EXPERIMENT.md` at the repo root by default; `--config` to override) and produce a report. |
 | `slopboss version` | Print the slopboss version. |
 
 ### Common flags
 
 | Flag | Commands | Default | Description |
 | --- | --- | --- | --- |
-| `--provider` | `run`, `groom`, `setup`, `experiment run`, `experiment groom` | `codex` | Agent backend: `codex` or `claude`. For `experiment run` it is the default; the config and each variant can override it. |
-| `--repo` | `setup` | — (**required**) | Product repository to clone into each workspace. Prompted if omitted. |
+| `--provider` | `run`, `groom`, `setup`, `experiment run`, `experiment groom` | persisted (`codex`) | Agent backend: `codex` or `claude`. `setup` **persists** your choice to `CONFIG.md`, and the other commands default to it. |
+| `--dir` | **all commands** (global) | current directory | Board directory to operate in — run any command against a board from anywhere without `cd`. |
+| `--repo` | `setup` | — (prompted) | Product repository to clone into each workspace. |
 | `--ssh-url` | `setup` | `--repo` | Origin URL to set after cloning. |
+| `--branch` | `setup` | `main` (prompted) | Base/integration branch agents target; **created if the repo doesn't have it**, and persisted to `CONFIG.md`. |
 | `--agents` | `setup` | `2` | Number of Dev Agent workspaces to create. |
 | `--skip-interview` | `setup` | `false` | Skip the tech-stack interview; leave a placeholder `TECH.md`. |
-| `--config` | `experiment run` | — | Path to the experiment config (`EXPERIMENT.md` or `.json`). |
+| `--config` | `experiment run` | `EXPERIMENT.md` (repo root) | Override the experiment file to run (`.md` or `.json`). |
 | `--dry-run` | `experiment run` | `false` | Prepare prompts and worktrees without invoking the backend. |
 
 > ℹ️ `slopboss run` discovers how many Dev Agents to drive by counting the
@@ -187,6 +196,7 @@ coordination surface. `setup` scaffolds minimal starters you customize per proje
 | `DEV_AGENT.md` | Role instructions for Dev Agents. |
 | `TEAM_LEAD_AGENT.md` | Role instructions for the Team Lead. |
 | `TECH.md` | Project tech context shared with agents. |
+| `CONFIG.md` | slopboss's own configuration (product repo, base branch, backend, dev-agent count) as `- Key: Value` bullets — written by the setup wizard, read on startup, and used to pre-fill the wizard on re-run. |
 
 A task is a small block of Markdown with a title, `Owner`, `Branch`, `Status`,
 and a free-form body describing the work — for example:
@@ -216,12 +226,16 @@ You don't hand-write config — **the Team Lead helps you design it**, the same 
 `slopboss groom` curates the backlog:
 
 ```bash
-# 1. Design the experiment interactively; writes EXPERIMENT.md
+# 1. Design the experiment interactively; writes EXPERIMENT.md at the repo root
 slopboss experiment groom
 
-# 2. Run it (dry-run first to preview prompts/worktrees without spending tokens)
-slopboss experiment run --config EXPERIMENT.md --dry-run
-slopboss experiment run --config EXPERIMENT.md
+# 2. Run it — picks up EXPERIMENT.md automatically (dry-run first to preview
+#    prompts/worktrees without spending tokens)
+slopboss experiment run --dry-run
+slopboss experiment run
+
+# Point at a different file only when you want to:
+slopboss experiment run --config experiments/example.md
 ```
 
 Experiments are defined in the same human-friendly Markdown as the board.

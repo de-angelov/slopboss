@@ -7,8 +7,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
+
+// DefaultDevAgents is the dev-agent count used when none is configured.
+const DefaultDevAgents = 2
 
 // Timing and policy constants for the orchestrator loop.
 const (
@@ -83,7 +88,134 @@ var (
 	TeamLeadPath = filepath.Join(WorkspacesRoot, "repo-tl")
 	Agent1Path   = filepath.Join(WorkspacesRoot, "repo-agent-1")
 	Agent2Path   = filepath.Join(WorkspacesRoot, "repo-agent-2")
+
+	// BaseBranch is the product repository's integration branch that dev agents
+	// branch from and squash-merge into, and that merge detection scans. It is
+	// chosen at setup and persisted in CONFIG.md; it defaults to "main".
+	BaseBranch = loadBaseBranch()
+
+	// Provider is the persisted default agent backend (codex/claude) chosen at
+	// setup; commands use it as their --provider default. Defaults to
+	// DefaultProviderName.
+	Provider = loadProvider()
+
+	// RepoURL is the product repository recorded at setup (for reference and as
+	// the setup wizard's default on re-run). Empty until setup runs.
+	RepoURL = settingOr("product repo", "")
 )
+
+// Settings is slopboss's persisted, per-board configuration. slopboss keeps all
+// its state in Markdown (never JSON), so it is stored in CONFIG.md as
+// "- Key: Value" bullets — the same convention as the board and experiment files.
+type Settings struct {
+	RepoURL    string
+	BaseBranch string
+	Provider   string
+	DevAgents  int
+}
+
+// ConfigFilePath is the on-disk location of the persisted Markdown config.
+func ConfigFilePath() string {
+	return filepath.Join(RepoRoot, "CONFIG.md")
+}
+
+// SetRoot repoints RepoRoot and every path derived from it, then reloads the
+// persisted settings from the new location. The setup wizard uses it so it can
+// scaffold a board directory the user chooses instead of the current directory.
+func SetRoot(root string) {
+	RepoRoot = root
+	WorkspacesRoot = filepath.Join(RepoRoot, "workspaces")
+	LogsRoot = filepath.Join(WorkspacesRoot, "logs")
+	LogFilePath = DefaultLogFilePath()
+
+	BacklogFile = filepath.Join(RepoRoot, "BACKLOG.md")
+	TasksFile = filepath.Join(RepoRoot, "TASKS.md")
+	ArchiveFile = filepath.Join(RepoRoot, "ARCHIVE.md")
+	AgentsFile = filepath.Join(RepoRoot, "AGENTS.md")
+	DevAgentInstructionsFile = filepath.Join(RepoRoot, "DEV_AGENT.md")
+	TlAgentInstructionsFile = filepath.Join(RepoRoot, "TEAM_LEAD_AGENT.md")
+	TechFile = filepath.Join(RepoRoot, "TECH.md")
+
+	TeamLeadPath = filepath.Join(WorkspacesRoot, "repo-tl")
+	Agent1Path = filepath.Join(WorkspacesRoot, "repo-agent-1")
+	Agent2Path = filepath.Join(WorkspacesRoot, "repo-agent-2")
+
+	BaseBranch = loadBaseBranch()
+	Provider = loadProvider()
+	RepoURL = settingOr("product repo", "")
+	DevAgentCount = loadDevAgents()
+}
+
+// settingOr returns a "- Key: Value" setting from CONFIG.md, or def if the file
+// or key is missing.
+func settingOr(key, def string) string {
+	data, err := os.ReadFile(ConfigFilePath())
+	if err != nil {
+		return def
+	}
+	if v := mdSetting(string(data), key); v != "" {
+		return v
+	}
+	return def
+}
+
+func loadBaseBranch() string { return settingOr("base branch", "main") }
+func loadProvider() string   { return settingOr("provider", DefaultProviderName) }
+
+func loadDevAgents() int {
+	if n, err := strconv.Atoi(settingOr("dev agents", "")); err == nil && n >= 1 {
+		return n
+	}
+	return DefaultDevAgents
+}
+
+// mdSetting extracts a "- Key: Value" bullet (case-insensitive key) from Markdown
+// config content, ignoring prose and headings.
+func mdSetting(content, key string) string {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "- ") {
+			continue
+		}
+		k, v, ok := strings.Cut(strings.TrimPrefix(line, "- "), ":")
+		if ok && strings.EqualFold(strings.TrimSpace(k), key) {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// SaveSettings writes CONFIG.md and updates the in-process value so the current
+// process reflects the change immediately.
+func SaveSettings(s Settings) error {
+	if strings.TrimSpace(s.BaseBranch) == "" {
+		s.BaseBranch = "main"
+	}
+	if strings.TrimSpace(s.Provider) == "" {
+		s.Provider = DefaultProviderName
+	}
+	if s.DevAgents < 1 {
+		s.DevAgents = DefaultDevAgents
+	}
+	content := fmt.Sprintf(`# CONFIG
+
+slopboss configuration for this board. Edit the "- Key: Value" settings below;
+slopboss reads them on startup. This is the single home for slopboss config.
+
+- Product repo: %s
+- Base branch: %s
+- Provider: %s
+- Dev agents: %d
+`, s.RepoURL, s.BaseBranch, s.Provider, s.DevAgents)
+	if err := os.WriteFile(ConfigFilePath(), []byte(content), 0644); err != nil {
+		return err
+	}
+	RepoURL = s.RepoURL
+	BaseBranch = s.BaseBranch
+	Provider = s.Provider
+	DevAgentCount = s.DevAgents
+	return nil
+}
 
 // MustResolveRepoRoot finds the repo root by walking up from the working
 // directory (then the executable's directory) looking for the board markers,
