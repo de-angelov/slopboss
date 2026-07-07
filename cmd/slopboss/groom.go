@@ -10,8 +10,9 @@ import (
 var groomProvider string
 
 var groomCmd = &cobra.Command{
-	Use:   "groom",
-	Short: "Start an interactive Team Lead session to groom the backlog",
+	Use:         "groom",
+	Annotations: needsBoard,
+	Short:       "Start an interactive Team Lead session to groom the backlog",
 	Long: `Launch the Team Lead agent interactively, preloaded with its instructions
 (AGENTS.md, TEAM_LEAD_AGENT.md, TECH.md) and the current board, ready to capture
 and prioritize new tasks in BACKLOG.md. This is a one-off grooming session,

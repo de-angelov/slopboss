@@ -129,6 +129,12 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
+	if opts.BoardRoot != "" {
+		if err := config.SaveActiveBoard(opts.BoardRoot); err == nil {
+			fmt.Println("✓ active board recorded (commands run from anywhere will use it)")
+		}
+	}
+
 	fmt.Println()
 	fmt.Println("Setup complete.")
 	fmt.Println("Next steps:")

@@ -100,10 +100,12 @@ slopboss run
 `run` opens a live TUI and keeps working until you press `Ctrl-C` (or send
 `SIGTERM`), at which point it cancels in-flight sessions and exits cleanly.
 
-> **Where to run it:** every command operates on the board in the current
-> directory (found by walking up for the board files). Run commands from inside
-> your board directory, or point at it from anywhere with the global `--dir`:
-> `slopboss --dir ~/my-board experiment groom`.
+> **Where to run it:** slopboss resolves which board to use in this order —
+> `--dir <board>` if given, else the current directory if it's a board, else the
+> **active board recorded by `setup`** (in `~/.config/slopboss/config.md`). So
+> after `setup`, bare commands like `slopboss experiment groom` work from
+> anywhere and print which board they picked; use `--dir` to target a different
+> one.
 
 Switch backends at any time:
 

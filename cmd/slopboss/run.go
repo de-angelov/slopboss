@@ -10,8 +10,9 @@ import (
 var runProvider string
 
 var runCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Run the orchestrator reconcile loop",
+	Use:         "run",
+	Annotations: needsBoard,
+	Short:       "Run the orchestrator reconcile loop",
 	Long: `Run the orchestrator loop: poll the task board, reconcile it against running
 agent sessions, and start/stop backend sessions to match. Runs until
 interrupted (SIGINT/SIGTERM), then cancels in-flight sessions and exits.`,

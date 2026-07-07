@@ -119,6 +119,57 @@ func ConfigFilePath() string {
 	return filepath.Join(RepoRoot, "CONFIG.md")
 }
 
+// IsBoardRoot reports whether RepoRoot is an actual slopboss board (it has the
+// board marker files) rather than an unrelated directory. Commands that operate
+// on a board use it to give an actionable error when run from the wrong place.
+func IsBoardRoot() bool {
+	return hasRepoRootMarkers(RepoRoot)
+}
+
+// globalConfigPath is the user-level (not per-board) config, e.g.
+// ~/.config/slopboss/config.md. It records the active board so commands run from
+// anywhere can find it.
+func globalConfigPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "slopboss", "config.md")
+}
+
+// ActiveBoard returns the last board recorded by setup (empty if none).
+func ActiveBoard() string {
+	path := globalConfigPath()
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return mdSetting(string(data), "active board")
+}
+
+// SaveActiveBoard records board as the active board in the global config.
+func SaveActiveBoard(board string) error {
+	path := globalConfigPath()
+	if path == "" {
+		return fmt.Errorf("cannot locate a user config directory")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	content := fmt.Sprintf(`# slopboss
+
+Global slopboss configuration (not board-specific). The active board is what
+slopboss operates on when you run a command outside a board directory and do not
+pass --dir.
+
+- Active board: %s
+`, board)
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
 // SetRoot repoints RepoRoot and every path derived from it, then reloads the
 // persisted settings from the new location. The setup wizard uses it so it can
 // scaffold a board directory the user chooses instead of the current directory.

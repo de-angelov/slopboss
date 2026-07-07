@@ -38,20 +38,44 @@ By default slopboss operates on the board in the current directory; use --dir to
 point it at a board directory from anywhere.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	// Applies to every subcommand: if --dir is given, repoint the board root
-	// before the command runs.
+	// Applies to every subcommand: resolve which board to operate on, then verify
+	// board-requiring commands actually found one. Resolution order:
+	//   1. --dir (explicit)
+	//   2. the current directory, if it is a board
+	//   3. the active board recorded by setup (global config)
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if boardDir == "" {
+		if boardDir != "" {
+			abs, err := filepath.Abs(boardDir)
+			if err != nil {
+				return err
+			}
+			config.SetRoot(abs)
+		}
+		if cmd.Annotations["needsBoard"] != "true" {
 			return nil
 		}
-		abs, err := filepath.Abs(boardDir)
-		if err != nil {
-			return err
+
+		// Fall back to the remembered board when the current dir isn't one.
+		if boardDir == "" && !config.IsBoardRoot() {
+			if b := config.ActiveBoard(); b != "" {
+				config.SetRoot(b)
+				if config.IsBoardRoot() {
+					fmt.Fprintf(os.Stderr, "Using board %s (from config; pass --dir to override)\n", config.RepoRoot)
+				}
+			}
 		}
-		config.SetRoot(abs)
+		if !config.IsBoardRoot() {
+			return fmt.Errorf(
+				"%s is not a slopboss board directory — cd into your board, or point at it with --dir <board> (create one with 'slopboss setup')",
+				config.RepoRoot,
+			)
+		}
 		return nil
 	},
 }
+
+// needsBoard marks a command that must run against an existing board.
+var needsBoard = map[string]string{"needsBoard": "true"}
 
 // Execute runs the root command and maps errors to a non-zero exit code.
 func Execute() {

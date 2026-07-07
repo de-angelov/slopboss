@@ -28,8 +28,9 @@ var (
 )
 
 var experimentRunCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Run an experiment from a config file",
+	Use:         "run",
+	Annotations: needsBoard,
+	Short:       "Run an experiment from a config file",
 	Long: `Run an experiment: for each variant in the config, prepare an isolated git
 worktree, run the configured backend against the ticket prompt, and collect
 token/diff metrics into a report.
@@ -66,8 +67,9 @@ variant may override it, so a single run can compare codex against claude.`,
 var experimentGroomProvider string
 
 var experimentGroomCmd = &cobra.Command{
-	Use:   "groom",
-	Short: "Interactively design an experiment (EXPERIMENT.md) with the Team Lead",
+	Use:         "groom",
+	Annotations: needsBoard,
+	Short:       "Interactively design an experiment (EXPERIMENT.md) with the Team Lead",
 	Long: `Launch the Team Lead agent interactively, preloaded with its instructions and
 the current board, to help you design a model/prompt/backend experiment and
 capture it in EXPERIMENT.md — the same way "slopboss groom" curates the backlog.
