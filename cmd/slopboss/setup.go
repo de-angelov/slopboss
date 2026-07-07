@@ -89,23 +89,16 @@ non-interactively.`,
 			return err
 		}
 
-		// 6. Tech quiz — slopboss asks a few questions natively (instant, no agent
-		//    TUI); the backend then writes TECH.md headlessly from the answers.
+		// 6. Tech interview — the backend drives an adaptive Q&A (slopboss relays
+		//    each question/answer natively, so no agent-TUI double-render), then it
+		//    writes TECH.md.
 		runQuiz := !setupSkipInterview
 		if !cmd.Flags().Changed("skip-interview") {
-			runQuiz = askYesNo(reader, "Run the tech-stack quiz now?", true)
+			runQuiz = askYesNo(reader, "Run the tech-stack interview now?", true)
 		}
 		var interview provider.Provider
-		var tech *setup.TechAnswers
 		if runQuiz {
 			interview, _ = provider.ByName(providerName) // already validated above
-			fmt.Printf("\nTech quiz — a few questions, then %s writes TECH.md:\n", providerName)
-			tech = &setup.TechAnswers{
-				Product:      ask(reader, "What are you building? (one line)", ""),
-				Stack:        ask(reader, "Stack — language, framework, package manager/runtime", ""),
-				Verification: ask(reader, "How is work verified, and what does \"done\" mean?", ""),
-				Conventions:  ask(reader, "Conventions to enforce or things to avoid (optional)", ""),
-			}
 		}
 
 		return setup.Run(cmd.Context(), setup.Options{
@@ -117,7 +110,6 @@ non-interactively.`,
 			BaseBranch:     branch,
 			Provider:       providerName,
 			Interview:      interview,
-			Tech:           tech,
 		})
 	},
 }

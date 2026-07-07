@@ -157,7 +157,9 @@ func (codexProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec)
 	// codex supports the full spec: --output-last-message captures the final
 	// message, --profile and per-variant --config tune the run, and --json emits
 	// the event stream the monitor parses for token accounting.
-	args := []string{"exec", "--sandbox", "danger-full-access", "--json"}
+	// --skip-git-repo-check allows non-git working dirs (e.g. the board root used
+	// by the tech interview).
+	args := []string{"exec", "--sandbox", "danger-full-access", "--skip-git-repo-check", "--json"}
 	if spec.LastMessageFile != "" {
 		args = append(args, "--output-last-message", spec.LastMessageFile)
 	}

@@ -4,9 +4,11 @@
 package setup
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,15 +17,6 @@ import (
 	"github.com/de-angelov/slopboss/internal/config"
 	"github.com/de-angelov/slopboss/internal/provider"
 )
-
-// TechAnswers holds the user's answers to the native tech quiz; the agent turns
-// them into TECH.md headlessly (no interactive TUI).
-type TechAnswers struct {
-	Product      string
-	Stack        string
-	Verification string
-	Conventions  string
-}
 
 // DefaultDevAgents is the number of dev-agent workspaces created when the count
 // is not specified.
@@ -52,11 +45,9 @@ type Options struct {
 	// Provider is the default agent backend (codex/claude) persisted to CONFIG.md
 	// so run/groom/experiment default to it without a flag.
 	Provider string
-	// Interview, when set, is the backend used to synthesize TECH.md from Tech.
-	// Nil (or a nil Tech) skips the quiz and leaves the placeholder TECH.md.
+	// Interview, when set, is the backend that runs the LLM-driven tech interview
+	// and writes TECH.md. Nil skips it and leaves the placeholder TECH.md.
 	Interview provider.Provider
-	// Tech holds the native quiz answers the backend turns into TECH.md.
-	Tech *TechAnswers
 }
 
 func (o Options) withDefaults() Options {
@@ -131,10 +122,10 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	if opts.Interview != nil && opts.Tech != nil && opts.BoardRoot != "" {
+	if opts.Interview != nil && opts.BoardRoot != "" {
 		fmt.Println()
-		if err := writeTechFromAnswers(ctx, opts); err != nil {
-			return fmt.Errorf("tech quiz: %w", err)
+		if err := llmInterview(ctx, opts); err != nil {
+			return fmt.Errorf("tech interview: %w", err)
 		}
 	}
 
@@ -148,17 +139,110 @@ func Run(ctx context.Context, opts Options) error {
 	return nil
 }
 
-// writeTechFromAnswers runs the backend headlessly (no interactive TUI) to turn
-// the native quiz answers into TECH.md. Its output goes to a buffer, never the
-// terminal, so there is no TUI double-render; the agent writes ./TECH.md itself.
-func writeTechFromAnswers(ctx context.Context, opts Options) error {
-	p := opts.Interview
-	fmt.Printf("Generating %s with %s from your answers...\n", filepath.Join(filepath.Base(opts.BoardRoot), "TECH.md"), p.Name())
+// interviewMaxQuestions caps the adaptive interview so it always terminates.
+const interviewMaxQuestions = 8
 
-	model := p.DefaultModel(config.TeamLeadRole)
-	cmd := p.Command(ctx, model, 0) // headless
+// llmInterview runs an LLM-driven tech interview: the backend picks and adapts
+// each question, but slopboss prints the question and reads the answer natively
+// (single-print, no TUI), then the backend writes TECH.md from the transcript.
+// Each turn is a headless model call, so nothing renders to the terminal but the
+// question slopboss prints itself.
+func llmInterview(ctx context.Context, opts Options) error {
+	p := opts.Interview
+	fmt.Printf("Tech interview with %s — answer a few questions, then it writes TECH.md.\n", p.Name())
+	fmt.Println("Press Enter to skip a question.")
+
+	reader := bufio.NewReader(os.Stdin)
+	var transcript strings.Builder
+
+	for i := 0; i < interviewMaxQuestions; i++ {
+		reply, err := captureFinalMessage(ctx, p, opts.BoardRoot, interviewTurnPrompt(transcript.String()))
+		if err != nil {
+			return err
+		}
+		if reply == "" || strings.HasPrefix(strings.ToUpper(reply), "DONE") {
+			break
+		}
+		question := cleanQuestion(reply)
+		fmt.Printf("\n%s\n> ", question)
+		answer, _ := reader.ReadString('\n')
+		fmt.Fprintf(&transcript, "Q: %s\nA: %s\n\n", question, strings.TrimSpace(answer))
+	}
+
+	fmt.Printf("\nGenerating TECH.md with %s...\n", p.Name())
+	if err := writeTechFile(ctx, opts, transcript.String()); err != nil {
+		return err
+	}
+	fmt.Println("✓ wrote TECH.md")
+	return nil
+}
+
+// captureFinalMessage runs one headless turn and returns the backend's final
+// assistant message. It uses ExperimentCommand so codex captures its final
+// message via --output-last-message; claude's monitor parses it from the stream.
+func captureFinalMessage(ctx context.Context, p provider.Provider, dir, prompt string) (string, error) {
+	lastMsg := filepath.Join(dir, ".slopboss-lastmsg.txt")
+	defer os.Remove(lastMsg)
+
+	cmd := p.ExperimentCommand(ctx, provider.ExperimentSpec{
+		Model:           p.DefaultModel(config.TeamLeadRole),
+		LastMessageFile: lastMsg,
+	})
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(prompt)
+
+	monitor := p.NewMonitor()
+	var out bytes.Buffer
+	cmd.Stdout = io.MultiWriter(monitor, &out)
+	cmd.Stderr = io.MultiWriter(monitor, &out)
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%w: %s", err, tail(out.String(), 300))
+	}
+
+	msg := strings.TrimSpace(monitor.FinalMessage())
+	if msg == "" {
+		if data, err := os.ReadFile(lastMsg); err == nil {
+			msg = strings.TrimSpace(string(data))
+		}
+	}
+	return msg, nil
+}
+
+// interviewTurnPrompt asks the backend for the next interview question (or DONE),
+// given the conversation so far.
+func interviewTurnPrompt(transcript string) string {
+	convo := strings.TrimSpace(transcript)
+	if convo == "" {
+		convo = "(none yet — ask your first question)"
+	}
+	return fmt.Sprintf(`You are interviewing a developer to produce an excellent TECH.md for a NEW (empty) project. Ask ONE focused question at a time and ADAPT to prior answers (e.g. ask stack-specific follow-ups). Aim to understand: what they are building, the stack (language, framework, package manager, backend, database), how work is verified and what "done" means, and key conventions to enforce or avoid. Be smart: skip anything already answered, and do NOT ask about individual shell commands you can infer from the stack.
+
+Reply with EITHER:
+- the next question ONLY (a single short line — no numbering, no preamble, no quotes), OR
+- the exact word DONE (nothing else) once you have enough for a solid TECH.md. Aim for about 4-6 questions total.
+
+Conversation so far:
+%s`, convo)
+}
+
+// cleanQuestion strips common prefixes a model may add to its question line.
+func cleanQuestion(s string) string {
+	s = strings.TrimSpace(s)
+	for _, prefix := range []string{"QUESTION:", "Question:", "Q:", "-", "*"} {
+		s = strings.TrimSpace(strings.TrimPrefix(s, prefix))
+	}
+	return strings.Trim(s, "\"")
+}
+
+// writeTechFile has the backend write ./TECH.md from the interview transcript,
+// inferring the mechanical bits and following an in-depth structure. It runs
+// headless (output discarded) so nothing double-renders; the agent writes the
+// file itself.
+func writeTechFile(ctx context.Context, opts Options, transcript string) error {
+	p := opts.Interview
+	cmd := p.Command(ctx, p.DefaultModel(config.TeamLeadRole), 0) // headless
 	cmd.Dir = opts.BoardRoot
-	cmd.Stdin = strings.NewReader(techSynthesisPrompt(*opts.Tech))
+	cmd.Stdin = strings.NewReader(techSynthesisPrompt(transcript))
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -166,35 +250,48 @@ func writeTechFromAnswers(ctx context.Context, opts Options) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%w: %s", err, tail(out.String(), 300))
 	}
-
-	fmt.Println("✓ wrote TECH.md")
 	return nil
 }
 
-// techSynthesisPrompt tells the backend to write ./TECH.md from the answers,
-// inferring the mechanical bits (exact commands, layout) rather than asking.
-func techSynthesisPrompt(a TechAnswers) string {
-	return fmt.Sprintf(`Write the file ./TECH.md (in your current working directory) for a new project, using the user's answers below. Do this task only: write that one file, then stop. Do not run other commands, do not print explanations.
+// techSynthesisPrompt tells the backend to write an in-depth ./TECH.md from the
+// interview transcript, inferring the mechanical bits (exact commands, layout,
+// and the standards typical for the chosen stack). The structure mirrors a mature
+// TECH.md (stack, architecture, coding standards, testing) minus the git/board
+// workflow rules that live in AGENTS.md/DEV_AGENT.md.
+func techSynthesisPrompt(transcript string) string {
+	convo := strings.TrimSpace(transcript)
+	if convo == "" {
+		convo = "(no answers were given — use sensible, widely-used defaults)"
+	}
+	return fmt.Sprintf(`Write the file ./TECH.md (in your current working directory) for a new project, using the interview below. Do this task only: write that one file, then stop. Do not run other commands, do not print explanations.
 
-Infer the exact install, test, build/typecheck, and lint commands and the conventional directory layout from the stack — fill them in concretely, do not leave placeholders.
+Make it genuinely useful and in-depth — a dev agent should be able to implement and verify a task from it alone. Infer everything mechanical from the stack: the exact install/test/build/typecheck/lint (and any migration/codegen) commands, the conventional directory layout, and the coding/testing standards typical for that stack. Fill every section concretely; do not leave angle-bracket placeholders. You may use fenced code blocks for commands and add sub-bullets where it helps. Do NOT include git/branching/board-workflow rules — those live in AGENTS.md and DEV_AGENT.md.
 
-Answers:
-- Building: %s
-- Stack: %s
-- Verification / definition of done: %s
-- Conventions / avoid: %s
+Interview:
+%s
 
-Write ./TECH.md in EXACTLY this Markdown shape (omit any line that does not apply):
+Follow this structure (drop a section only if it truly does not apply):
 
 # TECH
 
-<one short paragraph: what this product is>
+One short paragraph: what this product is and how it is structured.
 
 ## Technology Stack
 
-- Language:
-- Framework:
-- Package manager / runtime:
+- Language / runtime:
+- Framework(s):
+- Package manager:
+- Backend / server:
+- Database / storage:
+- Key libraries:
+
+## Architecture
+
+A few sentences on layers, data flow, and module boundaries.
+
+## Coding Standards
+
+- Naming, patterns to prefer, and patterns to avoid for this stack.
 
 ## Commands
 
@@ -202,21 +299,20 @@ Write ./TECH.md in EXACTLY this Markdown shape (omit any line that does not appl
 - Test:
 - Build / typecheck:
 - Lint / format:
+- Other (migrations, codegen, seeds):
+
+## Testing
+
+- Test stack:
+- What must be covered (and the coverage/verification bar):
+- Where tests live:
 
 ## Conventions
 
 - Directory layout:
-- Testing:
 - Definition of done:
 - Avoid:
-`, emptyDash(a.Product), emptyDash(a.Stack), emptyDash(a.Verification), emptyDash(a.Conventions))
-}
-
-func emptyDash(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "(not specified — use your best judgement)"
-	}
-	return s
+`, convo)
 }
 
 func tail(s string, n int) string {

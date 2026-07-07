@@ -85,9 +85,9 @@ go build -o slopboss ./cmd/slopboss
 ```bash
 # 1. Run the setup wizard — it prompts for the board directory, product repo,
 #    base branch, dev-agent count, and backend, then clones workspaces, creates
-#    the base branch if missing, scaffolds the board, and interviews the Team
-#    Lead about your stack -> TECH.md. Pass any answer as a flag to skip its
-#    prompt (e.g. --repo ... --agents 2 --skip-interview for CI).
+#    the base branch if missing, scaffolds the board, and runs an adaptive tech
+#    interview (the agent asks, you answer, it writes TECH.md). Pass any answer
+#    as a flag to skip its prompt (e.g. --repo ... --agents 2 --skip-interview).
 slopboss setup
 
 # 2. Add and prioritize work with an interactive Team Lead session
@@ -156,7 +156,7 @@ dependent tasks never get stuck behind a session that was cancelled mid-completi
 
 | Command | What it does |
 | --- | --- |
-| `slopboss setup` | Interactive wizard (like `npm init`): prompts for the board directory, product repo, base branch, dev-agent count, and backend; clones the workspaces, creates the base branch if missing, scaffolds the board files + `CONFIG.md`, and runs the Team Lead tech-stack interview. Any answer given as a flag isn't prompted, so it can run fully non-interactively. |
+| `slopboss setup` | Interactive wizard (like `npm init`): prompts for the board directory, product repo, base branch, dev-agent count, and backend; clones the workspaces, creates the base branch if missing, scaffolds the board files + `CONFIG.md`, then runs an **adaptive tech interview** — the backend asks follow-up questions (slopboss relays each Q&A) and writes `TECH.md`. Any answer given as a flag isn't prompted, so it can run fully non-interactively. |
 | `slopboss run` | Run the autonomous reconcile loop with a live TUI until interrupted. |
 | `slopboss groom` | Launch a one-off **interactive** Team Lead session to capture and prioritize tasks in `BACKLOG.md`. |
 | `slopboss experiment groom` | Design an experiment interactively with the Team Lead, written to `EXPERIMENT.md`. |
