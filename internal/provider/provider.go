@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -14,6 +15,17 @@ import (
 
 	"github.com/de-angelov/slopboss/internal/config"
 )
+
+// sortedKeys returns the keys of m in sorted order, for deterministic --config
+// flag ordering.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 // Provider abstracts the agent backend CLI behind a common interface.
 type Provider interface {
@@ -29,6 +41,11 @@ type Provider interface {
 	// own process group, so it stays in the terminal's foreground group and
 	// receives keystrokes and Ctrl-C.
 	InteractiveCommand(ctx context.Context, model string, prompt string) *exec.Cmd
+	// ExperimentCommand builds a headless process for one experiment variant. The
+	// caller sets Dir + Stdin (the prompt) and wires Stdout/Stderr (typically an
+	// io.MultiWriter of a NewMonitor and the per-variant log file). Backend knobs
+	// in spec that a backend does not support are ignored.
+	ExperimentCommand(ctx context.Context, spec ExperimentSpec) *exec.Cmd
 	// DefaultModel returns the model to run for the given role, or "" to defer to
 	// the backend's own configured default.
 	DefaultModel(role string) string
@@ -36,12 +53,27 @@ type Provider interface {
 	NewMonitor() Monitor
 }
 
-// Monitor consumes a session's combined stdout/stderr, tees it to the log, and
-// extracts token usage plus a usage-limit signal.
+// ExperimentSpec carries the per-variant knobs an experiment run passes to a
+// backend. Model applies to every backend; Profile, Config, and LastMessageFile
+// are codex-specific and ignored by backends that do not support them (Claude
+// surfaces its final message through the event stream instead — see
+// Monitor.FinalMessage).
+type ExperimentSpec struct {
+	Model           string
+	Profile         string
+	Config          map[string]string
+	LastMessageFile string
+}
+
+// Monitor consumes a session's combined stdout/stderr and extracts token usage,
+// a usage-limit signal, and (where the backend surfaces it in-stream) the final
+// assistant message. It does not itself write anywhere else; callers tee output
+// to the log via an io.MultiWriter.
 type Monitor interface {
 	Write(p []byte) (int, error)
 	Breakdown() TokenBreakdown
 	UsageLimited() bool
+	FinalMessage() string
 }
 
 // newBackendCmd builds the backend process in its own process group and, when
@@ -118,6 +150,27 @@ func (codexProvider) InteractiveCommand(ctx context.Context, model string, promp
 	return exec.CommandContext(ctx, "codex", args...)
 }
 
+func (codexProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec) *exec.Cmd {
+	// codex supports the full spec: --output-last-message captures the final
+	// message, --profile and per-variant --config tune the run, and --json emits
+	// the event stream the monitor parses for token accounting.
+	args := []string{"exec", "--sandbox", "danger-full-access", "--json"}
+	if spec.LastMessageFile != "" {
+		args = append(args, "--output-last-message", spec.LastMessageFile)
+	}
+	if spec.Model != "" {
+		args = append(args, "--model", spec.Model)
+	}
+	if spec.Profile != "" {
+		args = append(args, "--profile", spec.Profile)
+	}
+	for _, key := range sortedKeys(spec.Config) {
+		args = append(args, "--config", fmt.Sprintf("%s=%s", key, spec.Config[key]))
+	}
+	args = append(args, "-")
+	return newBackendCmd(ctx, "codex", args...)
+}
+
 // ---------------------------------------------------------------------------
 // Claude Code
 // ---------------------------------------------------------------------------
@@ -160,4 +213,16 @@ func (claudeProvider) InteractiveCommand(ctx context.Context, model string, prom
 	}
 	args = append(args, prompt)
 	return exec.CommandContext(ctx, "claude", args...)
+}
+
+func (claudeProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec) *exec.Cmd {
+	// Claude runs headless with the same stream-json output the orchestrator uses,
+	// so claudeOutputMonitor parses token usage and the final message from it.
+	// Experiments run uncapped (real implementation work), and Profile/Config/
+	// LastMessageFile have no Claude equivalent, so they are ignored.
+	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"}
+	if spec.Model != "" {
+		args = append(args, "--model", spec.Model)
+	}
+	return newBackendCmd(ctx, "claude", args...)
 }

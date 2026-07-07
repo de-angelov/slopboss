@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/de-angelov/slopboss/internal/logx"
 )
 
 const codexUsageLimitMarker = "You've hit your usage limit"
@@ -55,7 +53,7 @@ func (w *codexOutputMonitor) Write(p []byte) (int, error) {
 	w.detectTokenUsageLocked(text)
 	w.mu.Unlock()
 
-	return logx.Writer{}.Write(p)
+	return len(p), nil
 }
 
 func (w *codexOutputMonitor) detectUsageLimitLocked(text string) {
@@ -185,6 +183,11 @@ func (w *codexOutputMonitor) UsageLimited() bool {
 	return w.usageLimitDetected
 }
 
+// FinalMessage returns "" for codex: its final assistant message is captured out
+// of band via the --output-last-message file the experiment harness passes, not
+// from the event stream.
+func (w *codexOutputMonitor) FinalMessage() string { return "" }
+
 // ---------------------------------------------------------------------------
 // Claude Code
 // ---------------------------------------------------------------------------
@@ -199,6 +202,7 @@ type claudeOutputMonitor struct {
 	line         string
 	usage        TokenBreakdown
 	usageLimited bool
+	finalMessage string
 }
 
 func (w *claudeOutputMonitor) Write(p []byte) (int, error) {
@@ -215,7 +219,7 @@ func (w *claudeOutputMonitor) Write(p []byte) (int, error) {
 	}
 	w.mu.Unlock()
 
-	return logx.Writer{}.Write(p)
+	return len(p), nil
 }
 
 func (w *claudeOutputMonitor) consumeLineLocked(line string) {
@@ -227,6 +231,7 @@ func (w *claudeOutputMonitor) consumeLineLocked(line string) {
 	var event struct {
 		Type    string `json:"type"`
 		IsError bool   `json:"is_error"`
+		Result  string `json:"result"`
 		Usage   *struct {
 			InputTokens              int `json:"input_tokens"`
 			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
@@ -248,15 +253,23 @@ func (w *claudeOutputMonitor) consumeLineLocked(line string) {
 		w.usageLimited = true
 	}
 
-	if event.Type == "result" && event.Usage != nil {
-		u := event.Usage
-		cached := u.CacheReadInputTokens + u.CacheCreationInputTokens
-		input := u.InputTokens + cached
-		w.usage = TokenBreakdown{
-			Input:       input,
-			CachedInput: cached,
-			Output:      u.OutputTokens,
-			Total:       input + u.OutputTokens,
+	if event.Type == "result" {
+		// The terminal result event carries both the cumulative usage and the
+		// final assistant text (the `result` field), which experiments surface as
+		// the variant's final-response summary.
+		if event.Result != "" {
+			w.finalMessage = event.Result
+		}
+		if event.Usage != nil {
+			u := event.Usage
+			cached := u.CacheReadInputTokens + u.CacheCreationInputTokens
+			input := u.InputTokens + cached
+			w.usage = TokenBreakdown{
+				Input:       input,
+				CachedInput: cached,
+				Output:      u.OutputTokens,
+				Total:       input + u.OutputTokens,
+			}
 		}
 	}
 }
@@ -276,4 +289,16 @@ func (w *claudeOutputMonitor) UsageLimited() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.usageLimited
+}
+
+// FinalMessage returns the final assistant text from the terminal result event.
+func (w *claudeOutputMonitor) FinalMessage() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if strings.TrimSpace(w.line) != "" {
+		w.consumeLineLocked(w.line)
+		w.line = ""
+	}
+	return w.finalMessage
 }

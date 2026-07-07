@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -157,9 +158,11 @@ func runSession(ctx context.Context, role string, workspace string, promptText s
 	cmd.Dir = workspace
 	cmd.Stdin = strings.NewReader(promptText)
 
+	// The monitor only parses; tee the raw stream to the orchestrator log too.
 	monitor := p.NewMonitor()
-	cmd.Stdout = monitor
-	cmd.Stderr = monitor
+	sink := io.MultiWriter(monitor, logx.Writer{})
+	cmd.Stdout = sink
+	cmd.Stderr = sink
 
 	modelLabel := model
 	if modelLabel == "" {

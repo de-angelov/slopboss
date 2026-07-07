@@ -108,25 +108,25 @@ slopboss run --provider claude
 ## 🧠 How it works
 
 ```
-                    ┌──────────────────────────────────────────────┐
+                    ┌────────────────────────────────────────────────┐
                     │                   THE BOARD                    │
                     │  BACKLOG.md   TASKS.md   ARCHIVE.md  (+ docs)  │
-                    └───────────────▲───────────────┬──────────────┘
-                        grooms /     │               │  polls every 10s
-                        promotes     │               ▼
-              ┌──────────────────────┴───┐   ┌───────────────────────┐
+                    └────────────────▲──────────────┬────────────────┘
+                        grooms /     │              │  polls every 10s
+                        promotes     │              │
+              ┌──────────────────────┴────┐   ┌─────▼──────────────────┐
               │      Team Lead Agent      │   │   slopboss reconcile   │
               │  (repo-tl workspace)      │   │         loop           │
-              └───────────────────────────┘   └───────────┬───────────┘
-                                                           │ start / cancel
-                                          ┌────────────────┼────────────────┐
-                                          ▼                ▼                ▼
+              └───────────────────────────┘   └───────────┬────────────┘
+                                                          │ start / cancel
+                                          ┌───────────────┼────────────────┐
+                                          ▼               ▼                ▼
                                    ┌────────────┐  ┌────────────┐   ┌────────────┐
                                    │ Dev Agent 1│  │ Dev Agent 2│ … │ Dev Agent N│
                                    │repo-agent-1│  │repo-agent-2│   │repo-agent-N│
                                    └─────┬──────┘  └─────┬──────┘   └─────┬──────┘
-                                         │ branch + PR   │               │
-                                         └───────────────┴───────────────┘
+                                         │ branch + PR   │                │
+                                         └───────────────┴────────────────┘
                                                     merges to main
 ```
 
@@ -151,19 +151,20 @@ dependent tasks never get stuck behind a session that was cancelled mid-completi
 | `slopboss setup` | Clone/refresh the Team Lead (`repo-tl`) and `N` Dev Agent (`repo-agent-1..N`) workspaces under `workspaces/`, and scaffold starter board files. |
 | `slopboss run` | Run the autonomous reconcile loop with a live TUI until interrupted. |
 | `slopboss groom` | Launch a one-off **interactive** Team Lead session to capture and prioritize tasks in `BACKLOG.md`. |
-| `slopboss experiment` | Run a model/prompt A/B experiment from a JSON config and produce a report. |
+| `slopboss experiment groom` | Design an experiment interactively with the Team Lead, written to `EXPERIMENT.md`. |
+| `slopboss experiment run` | Run an experiment from a config (`EXPERIMENT.md` or JSON) and produce a report. |
 | `slopboss version` | Print the slopboss version. |
 
 ### Common flags
 
 | Flag | Commands | Default | Description |
 | --- | --- | --- | --- |
-| `--provider` | `run`, `groom` | `codex` | Agent backend: `codex` or `claude`. |
+| `--provider` | `run`, `groom`, `experiment run`, `experiment groom` | `codex` | Agent backend: `codex` or `claude`. For `experiment run` it is the default; the config and each variant can override it. |
 | `--repo` | `setup` | — | Product repo HTTPS URL to clone into each workspace. |
 | `--ssh-url` | `setup` | — | Origin SSH URL to set after cloning. |
 | `--agents` | `setup` | `2` | Number of Dev Agent workspaces to create. |
-| `--config` | `experiment` | — | Path to the experiment JSON config. |
-| `--dry-run` | `experiment` | `false` | Prepare prompts and worktrees without invoking the backend. |
+| `--config` | `experiment run` | — | Path to the experiment config (`EXPERIMENT.md` or `.json`). |
+| `--dry-run` | `experiment run` | `false` | Prepare prompts and worktrees without invoking the backend. |
 
 > ℹ️ `slopboss run` discovers how many Dev Agents to drive by counting the
 > `repo-agent-*` workspaces created during `setup`.
@@ -205,19 +206,56 @@ branch and rewrites `TASKS.md`/`ARCHIVE.md` as the final step when the work is d
 
 ## 🧪 Experiments
 
-Compare models and prompts head-to-head on the same ticket. Each variant runs in
-an **isolated git worktree** so diffs never collide, and slopboss collects token
-and diff metrics into a `report.md`.
+Compare models, prompts, **and backends** head-to-head on the same ticket. Each
+variant runs in an **isolated git worktree** so diffs never collide, and slopboss
+collects token and diff metrics into a `report.md`.
+
+You don't hand-write config — **the Team Lead helps you design it**, the same way
+`slopboss groom` curates the backlog:
 
 ```bash
-slopboss experiment --config ./experiments/example-agent-loop.json
+# 1. Design the experiment interactively; writes EXPERIMENT.md
+slopboss experiment groom
 
-# Prepare prompts + worktrees without spending tokens on the backend:
-slopboss experiment --config ./experiments/example-agent-loop.json --dry-run
+# 2. Run it (dry-run first to preview prompts/worktrees without spending tokens)
+slopboss experiment run --config EXPERIMENT.md --dry-run
+slopboss experiment run --config EXPERIMENT.md
 ```
 
-On completion slopboss prints the path to the generated report, e.g.
-`experiments/<run>/report.md`.
+Experiments are defined in the same human-friendly Markdown as the board.
+Structured settings are `- Key: Value` bullets, each `### section` under
+`## Variants` is one variant, and prose is ignored — so a mistyped key is a real
+error, not a silent no-op:
+
+```markdown
+# Experiment: codex-vs-claude
+
+- Task: Add dark-mode toggle
+- Prompt mode: bounded
+
+## Variants
+
+### codex-baseline
+- Provider: codex
+- Model: gpt-5.5
+
+### claude-baseline
+- Provider: claude
+- Model: claude-sonnet-5
+```
+
+Experiments run through the same `Provider` abstraction as the orchestrator, so
+either backend works. Provider selection resolves per variant with a clear
+precedence — **variant `Provider` → file `Provider` → `--provider` flag** — so a
+single run can pit Codex against Claude. Token usage and the final-response
+summary are parsed live from each backend's own event stream (codex `--json`,
+Claude `stream-json`); codex-only knobs (`Profile`, `Config`) are ignored by
+Claude. On completion slopboss prints the path to the generated report, e.g.
+`experiments/<run>/report.md`, whose table includes a **Backend** column.
+
+> JSON configs are still accepted by `experiment run` (`--config foo.json`) for
+> automation; the Markdown format is the authoring default. A ready-to-edit
+> example lives at [`experiments/example.md`](experiments/example.md).
 
 ---
 

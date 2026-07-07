@@ -111,6 +111,67 @@ func TestInteractiveCommandsAreNotHeadless(t *testing.T) {
 	}
 }
 
+func TestCodexExperimentCommandCarriesAllKnobs(t *testing.T) {
+	cmd := (codexProvider{}).ExperimentCommand(context.Background(), ExperimentSpec{
+		Model:           "gpt-5.5",
+		Profile:         "fast",
+		Config:          map[string]string{"reasoning": "low"},
+		LastMessageFile: "/tmp/last.txt",
+	})
+	joined := strings.Join(cmd.Args, " ")
+	for _, want := range []string{"exec", "--json", "--output-last-message /tmp/last.txt", "--model gpt-5.5", "--profile fast", "--config reasoning=low"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("codex experiment command missing %q: %v", want, cmd.Args)
+		}
+	}
+	if cmd.Args[len(cmd.Args)-1] != "-" {
+		t.Fatalf("codex experiment command must read the prompt from stdin (end with '-'): %v", cmd.Args)
+	}
+}
+
+func TestClaudeExperimentCommandIsHeadlessAndIgnoresCodexKnobs(t *testing.T) {
+	cmd := (claudeProvider{}).ExperimentCommand(context.Background(), ExperimentSpec{
+		Model:           "claude-sonnet-5",
+		Profile:         "fast",
+		Config:          map[string]string{"reasoning": "low"},
+		LastMessageFile: "/tmp/last.txt",
+	})
+	joined := strings.Join(cmd.Args, " ")
+	for _, want := range []string{"-p", "--output-format stream-json", "--model claude-sonnet-5"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("claude experiment command missing %q: %v", want, cmd.Args)
+		}
+	}
+	for _, unwanted := range []string{"--output-last-message", "--profile", "--config", "exec"} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("claude experiment command must not carry codex-only knob %q: %v", unwanted, cmd.Args)
+		}
+	}
+}
+
+func TestClaudeOutputMonitorCapturesFinalMessage(t *testing.T) {
+	writer := &claudeOutputMonitor{}
+	lines := []string{
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"Implemented the feature.","usage":{"input_tokens":10,"output_tokens":5}}`,
+	}
+	for _, line := range lines {
+		if _, err := writer.Write([]byte(line + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := writer.FinalMessage(); got != "Implemented the feature." {
+		t.Fatalf("claude FinalMessage = %q, want %q", got, "Implemented the feature.")
+	}
+}
+
+func TestCodexOutputMonitorHasNoInStreamFinalMessage(t *testing.T) {
+	// codex surfaces its final message via --output-last-message, not the stream.
+	if got := (&codexOutputMonitor{}).FinalMessage(); got != "" {
+		t.Fatalf("codex FinalMessage = %q, want empty", got)
+	}
+}
+
 func TestCodexUsageLimitDetectionHandlesSplitOutput(t *testing.T) {
 	writer := &codexOutputMonitor{}
 

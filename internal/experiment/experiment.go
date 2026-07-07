@@ -1,12 +1,11 @@
 // Package experiment runs model/prompt A/B experiments: for each variant it
-// prepares an isolated git worktree, runs the codex backend against a ticket
-// prompt, and collects token/diff metrics into a JSON + Markdown report. Unlike
-// the orchestrator loop it is deliberately codex-only (it depends on
-// codex-specific flags and its --json event shape for token accounting).
+// prepares an isolated git worktree, runs an agent backend against a ticket
+// prompt, and collects token/diff metrics into a JSON + Markdown report. It drives
+// any backend through the provider abstraction (codex or claude), so variants can
+// even mix backends within a single run.
 package experiment
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha1"
@@ -18,7 +17,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,10 +25,12 @@ import (
 	cfg "github.com/de-angelov/slopboss/internal/config"
 	"github.com/de-angelov/slopboss/internal/git"
 	"github.com/de-angelov/slopboss/internal/prompt"
+	"github.com/de-angelov/slopboss/internal/provider"
 )
 
 type ExperimentConfig struct {
 	Name                  string              `json:"name"`
+	Provider              string              `json:"provider"`
 	SourceWorkspace       string              `json:"sourceWorkspace"`
 	BaseBranch            string              `json:"baseBranch"`
 	TicketFile            string              `json:"ticketFile"`
@@ -49,6 +49,7 @@ type ExperimentConfig struct {
 
 type ExperimentVariant struct {
 	Name       string            `json:"name"`
+	Provider   string            `json:"provider"`
 	Model      string            `json:"model"`
 	Profile    string            `json:"profile"`
 	PromptFile string            `json:"promptFile"`
@@ -67,6 +68,7 @@ type ExperimentRun struct {
 
 type ExperimentVariantResult struct {
 	Name                 string            `json:"name"`
+	Provider             string            `json:"provider,omitempty"`
 	Model                string            `json:"model,omitempty"`
 	Profile              string            `json:"profile,omitempty"`
 	Config               map[string]string `json:"config,omitempty"`
@@ -101,13 +103,9 @@ type ExperimentVariantResult struct {
 	FinalResponseSummary string            `json:"finalResponseSummary,omitempty"`
 }
 
-type tokenUsage struct {
-	Input  int
-	Output int
-	Total  int
-}
-
-// ReadConfig loads and validates an experiment JSON config, applying defaults.
+// ReadConfig loads and validates an experiment config, applying defaults. A
+// ".md" path is parsed as the Markdown experiment format; anything else is parsed
+// as JSON.
 func ReadConfig(path string) (ExperimentConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -115,11 +113,21 @@ func ReadConfig(path string) (ExperimentConfig, error) {
 	}
 
 	var config ExperimentConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return ExperimentConfig{}, err
+	if strings.HasSuffix(strings.ToLower(path), ".md") {
+		config, err = parseMarkdownConfig(string(data))
+	} else {
+		err = json.Unmarshal(data, &config)
+	}
+	if err != nil {
+		return ExperimentConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if config.Name == "" {
 		return ExperimentConfig{}, fmt.Errorf("name is required")
+	}
+	if config.Provider != "" {
+		if _, err := provider.ByName(config.Provider); err != nil {
+			return ExperimentConfig{}, err
+		}
 	}
 	if config.SourceWorkspace == "" {
 		config.SourceWorkspace = cfg.Agent1Path
@@ -180,12 +188,35 @@ func ReadConfig(path string) (ExperimentConfig, error) {
 			return ExperimentConfig{}, fmt.Errorf("duplicate variant name %q", config.Variants[i].Name)
 		}
 		seen[config.Variants[i].Name] = true
+		if config.Variants[i].Provider != "" {
+			if _, err := provider.ByName(config.Variants[i].Provider); err != nil {
+				return ExperimentConfig{}, fmt.Errorf("variants[%d]: %w", i, err)
+			}
+		}
 		if config.Variants[i].PromptFile != "" && !filepath.IsAbs(config.Variants[i].PromptFile) {
 			config.Variants[i].PromptFile = filepath.Join(cfg.RepoRoot, config.Variants[i].PromptFile)
 		}
 	}
 
 	return config, nil
+}
+
+// variantProvider resolves the backend for one variant: an explicit per-variant
+// provider wins, then the config-level default, then the run-level default (the
+// experiment command's --provider flag).
+func variantProvider(config ExperimentConfig, variant ExperimentVariant, defaultProvider string) (provider.Provider, string, error) {
+	name := variant.Provider
+	if name == "" {
+		name = config.Provider
+	}
+	if name == "" {
+		name = defaultProvider
+	}
+	p, err := provider.ByName(name)
+	if err != nil {
+		return nil, "", err
+	}
+	return p, p.Name(), nil
 }
 
 func (config ExperimentConfig) ResolvedOutputDir() string {
@@ -195,8 +226,10 @@ func (config ExperimentConfig) ResolvedOutputDir() string {
 	return config.OutputDir
 }
 
-// Run executes every variant of config and writes the run report.
-func Run(ctx context.Context, config ExperimentConfig, dryRun bool) (ExperimentRun, error) {
+// Run executes every variant of config and writes the run report. defaultProvider
+// is the run-level backend (the experiment command's --provider flag); individual
+// variants or the config may override it.
+func Run(ctx context.Context, config ExperimentConfig, defaultProvider string, dryRun bool) (ExperimentRun, error) {
 	runName := experimentRunName(config.Name, time.Now())
 	runDir := filepath.Join(config.ResolvedOutputDir(), runName)
 	worktreeRoot := filepath.Join(runDir, "worktrees")
@@ -224,7 +257,11 @@ func Run(ctx context.Context, config ExperimentConfig, dryRun bool) (ExperimentR
 	}
 
 	for _, variant := range config.Variants {
-		result, err := runExperimentVariant(ctx, config, runName, worktreeRoot, baseCommit, task, variant, dryRun)
+		p, providerName, err := variantProvider(config, variant, defaultProvider)
+		if err != nil {
+			return run, fmt.Errorf("variant %q: %w", variant.Name, err)
+		}
+		result, err := runExperimentVariant(ctx, config, runName, worktreeRoot, baseCommit, task, variant, p, providerName, dryRun)
 		if err != nil {
 			return run, err
 		}
@@ -278,7 +315,7 @@ func resolveExperimentTask(config ExperimentConfig) (board.Task, string, error) 
 	return board.Task{}, "", fmt.Errorf("task %q not found in %s", config.TaskTitle, sourceFile)
 }
 
-func runExperimentVariant(ctx context.Context, config ExperimentConfig, runName string, worktreeRoot string, baseCommit string, task board.Task, variant ExperimentVariant, dryRun bool) (ExperimentVariantResult, error) {
+func runExperimentVariant(ctx context.Context, config ExperimentConfig, runName string, worktreeRoot string, baseCommit string, task board.Task, variant ExperimentVariant, p provider.Provider, providerName string, dryRun bool) (ExperimentVariantResult, error) {
 	start := time.Now()
 	variantID := git.SanitizeBranchPart(variant.Name)
 	branch := fmt.Sprintf("experiment/%s/%s", git.SanitizeBranchPart(runName), variantID)
@@ -302,6 +339,7 @@ func runExperimentVariant(ctx context.Context, config ExperimentConfig, runName 
 
 	result := ExperimentVariantResult{
 		Name:               variant.Name,
+		Provider:           providerName,
 		Model:              variant.Model,
 		Profile:            variant.Profile,
 		Config:             variant.Config,
@@ -337,7 +375,7 @@ func runExperimentVariant(ctx context.Context, config ExperimentConfig, runName 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	err = runCodexExperiment(runCtx, worktree, promptText, variant, logFile, lastMessageFile)
+	usage, finalMessage, err := runVariantBackend(runCtx, p, worktree, promptText, variant, logFile, lastMessageFile)
 	result.FinishedAt = time.Now()
 	result.DurationMilliseconds = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
 	if err != nil {
@@ -351,14 +389,21 @@ func runExperimentVariant(ctx context.Context, config ExperimentConfig, runName 
 		result.ExitError = runCtx.Err().Error()
 	}
 
-	if usage, err := parseCodexTokenUsage(logFile); err == nil {
-		result.DetectedInputTokens = usage.Input
-		result.DetectedOutputTokens = usage.Output
-		result.DetectedTotalTokens = usage.Total
+	result.DetectedInputTokens = usage.Input
+	result.DetectedOutputTokens = usage.Output
+	result.DetectedTotalTokens = usage.Total
+
+	// Prefer the final message the monitor captured from the event stream (Claude);
+	// fall back to the --output-last-message file the backend wrote (codex). Either
+	// way, persist it so the artifact exists for every backend.
+	if finalMessage == "" {
+		if data, err := os.ReadFile(lastMessageFile); err == nil {
+			finalMessage = string(data)
+		}
+	} else {
+		_ = os.WriteFile(lastMessageFile, []byte(finalMessage), 0644)
 	}
-	if data, err := os.ReadFile(lastMessageFile); err == nil {
-		result.FinalResponseSummary = oneLine(string(data))
-	}
+	result.FinalResponseSummary = oneLine(finalMessage)
 
 	return finalizeExperimentResult(worktree, baseCommit, patchFile, result)
 }
@@ -508,48 +553,44 @@ Runtime Rules:
 `, board.MustRead(cfg.AgentsFile), board.MustRead(cfg.TechFile), prompt.TestingDisciplineRules, variantPrompt, task.Body), nil
 }
 
-// runCodexExperiment runs a single experiment variant. Experiments are
-// deliberately codex-only: unlike the orchestrator loop (which drives either
-// backend via the Provider interface), the experiment harness hardcodes the
-// codex CLI because it depends on codex-specific flags (--output-last-message,
-// --profile, per-variant --config overrides) and its --json event shape for
-// token accounting. Generalizing this to Provider would mean widening that
-// interface for features only codex exposes, so it is intentionally not wired
-// through the provider abstraction.
-func runCodexExperiment(ctx context.Context, workspace string, promptText string, variant ExperimentVariant, logFile string, lastMessageFile string) error {
-	args := []string{"exec", "--sandbox", "danger-full-access", "--json", "--output-last-message", lastMessageFile}
-	if variant.Model != "" {
-		args = append(args, "--model", variant.Model)
-	}
-	if variant.Profile != "" {
-		args = append(args, "--profile", variant.Profile)
-	}
-	for _, key := range sortedConfigKeys(variant.Config) {
-		args = append(args, "--config", fmt.Sprintf("%s=%s", key, variant.Config[key]))
-	}
-	args = append(args, "-")
-
-	cmd := exec.CommandContext(ctx, "codex", args...)
+// runVariantBackend runs a single experiment variant through the provider
+// abstraction, driving codex or claude identically. The backend's structured
+// event stream is written to logFile and parsed live by the provider's Monitor,
+// which yields token usage and (for backends that surface it in-stream) the final
+// assistant message. codex additionally writes lastMessageFile via
+// --output-last-message.
+func runVariantBackend(ctx context.Context, p provider.Provider, workspace string, promptText string, variant ExperimentVariant, logFile string, lastMessageFile string) (provider.TokenBreakdown, string, error) {
+	cmd := p.ExperimentCommand(ctx, provider.ExperimentSpec{
+		Model:           variant.Model,
+		Profile:         variant.Profile,
+		Config:          variant.Config,
+		LastMessageFile: lastMessageFile,
+	})
 	cmd.Dir = workspace
 	cmd.Stdin = strings.NewReader(promptText)
 
 	logOutput, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return err
+		return provider.TokenBreakdown{}, "", err
 	}
 	defer logOutput.Close()
 
+	monitor := p.NewMonitor()
 	var stderr bytes.Buffer
-	cmd.Stdout = logOutput
-	cmd.Stderr = io.MultiWriter(logOutput, &stderr)
+	cmd.Stdout = io.MultiWriter(logOutput, monitor)
+	cmd.Stderr = io.MultiWriter(logOutput, monitor, &stderr)
 
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	usage := monitor.Breakdown()
+	finalMessage := monitor.FinalMessage()
+
+	if runErr != nil {
 		if stderr.Len() > 0 {
-			return fmt.Errorf("%w: %s", err, oneLine(stderr.String()))
+			return usage, finalMessage, fmt.Errorf("%w: %s", runErr, oneLine(stderr.String()))
 		}
-		return err
+		return usage, finalMessage, runErr
 	}
-	return nil
+	return usage, finalMessage, nil
 }
 
 func finalizeExperimentResult(worktree string, baseCommit string, patchFile string, result ExperimentVariantResult) (ExperimentVariantResult, error) {
@@ -635,11 +676,12 @@ func writeExperimentReports(runDir string, run ExperimentRun) error {
 	fmt.Fprintf(&b, "- Started: `%s`\n", run.StartedAt.Format(time.RFC3339))
 	fmt.Fprintf(&b, "- Finished: `%s`\n\n", run.FinishedAt.Format(time.RFC3339))
 
-	b.WriteString("| Variant | Status | Prepare | Duration | Approx prompt tokens | Detected total tokens | Commits | Files | +/- | Branch |\n")
-	b.WriteString("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n")
+	b.WriteString("| Variant | Backend | Status | Prepare | Duration | Approx prompt tokens | Detected total tokens | Commits | Files | +/- | Branch |\n")
+	b.WriteString("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n")
 	for _, result := range run.Results {
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %s | %d | %d | +%d/-%d | `%s` |\n",
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %d | %s | %d | %d | +%d/-%d | `%s` |\n",
 			escapeTable(result.Name),
+			escapeTable(result.Provider),
 			escapeTable(result.Status),
 			escapeTable(formatPrepareStatus(result)),
 			(time.Duration(result.DurationMilliseconds) * time.Millisecond).Round(time.Second),
@@ -690,58 +732,6 @@ func formatPrepareStatus(result ExperimentVariantResult) string {
 	return fmt.Sprintf("%s %s", result.PrepareStatus, (time.Duration(result.PrepareMilliseconds) * time.Millisecond).Round(time.Second))
 }
 
-func parseCodexTokenUsage(path string) (tokenUsage, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return tokenUsage{}, err
-	}
-	defer f.Close()
-
-	var usage tokenUsage
-	nextLineIsTotal := false
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if nextLineIsTotal {
-			if value := parseFlexibleInt(line); value > 0 {
-				usage.Total += value
-			}
-			nextLineIsTotal = false
-		}
-		if strings.EqualFold(strings.TrimSpace(line), "tokens used") {
-			nextLineIsTotal = true
-			continue
-		}
-		for _, pair := range tokenRegex.FindAllStringSubmatch(line, -1) {
-			value := parseFlexibleInt(pair[2])
-			key := strings.ToLower(pair[1])
-			switch {
-			case strings.Contains(key, "input"):
-				usage.Input += value
-			case strings.Contains(key, "output"):
-				usage.Output += value
-			case strings.Contains(key, "total"):
-				usage.Total += value
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return tokenUsage{}, err
-	}
-	if usage.Total == 0 {
-		usage.Total = usage.Input + usage.Output
-	}
-	return usage, nil
-}
-
-var tokenRegex = regexp.MustCompile(`(?i)"?([a-z_]*tokens?)"?\s*[:=]\s*([0-9,]+)`)
-
-func parseFlexibleInt(value string) int {
-	value = strings.ReplaceAll(strings.TrimSpace(value), ",", "")
-	parsed, _ := strconv.Atoi(value)
-	return parsed
-}
-
 func parseDiffShortstat(stat string) (int, int, int) {
 	files := extractShortstatNumber(stat, `([0-9]+) files? changed`)
 	insertions := extractShortstatNumber(stat, `([0-9]+) insertions?\(\+\)`)
@@ -773,15 +763,6 @@ func experimentRunName(name string, now time.Time) string {
 func shortHash(value string) string {
 	sum := sha1.Sum([]byte(value))
 	return hex.EncodeToString(sum[:])[:8]
-}
-
-func sortedConfigKeys(config map[string]string) []string {
-	keys := make([]string, 0, len(config))
-	for key := range config {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func escapeTable(value string) string {

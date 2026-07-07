@@ -252,16 +252,36 @@ func TestParseDiffShortstat(t *testing.T) {
 	}
 }
 
-func TestParseCodexTokenUsageFromPlainTextSummary(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "codex.log")
-	mustWriteTestFile(t, path, "tokens used\n360,377\n")
-
-	usage, err := parseCodexTokenUsage(path)
-	if err != nil {
-		t.Fatal(err)
+func TestVariantProviderResolutionPrecedence(t *testing.T) {
+	// per-variant provider wins over config- and run-level defaults.
+	_, name, err := variantProvider(
+		ExperimentConfig{Provider: "codex"},
+		ExperimentVariant{Provider: "claude"},
+		"codex",
+	)
+	if err != nil || name != "claude" {
+		t.Fatalf("per-variant provider = %q err=%v, want claude", name, err)
 	}
-	if usage.Total != 360377 {
-		t.Fatalf("Total = %d, want 360377", usage.Total)
+
+	// config-level provider wins over the run-level default.
+	_, name, err = variantProvider(
+		ExperimentConfig{Provider: "claude"},
+		ExperimentVariant{},
+		"codex",
+	)
+	if err != nil || name != "claude" {
+		t.Fatalf("config provider = %q err=%v, want claude", name, err)
+	}
+
+	// falls back to the run-level default when nothing is set.
+	_, name, err = variantProvider(ExperimentConfig{}, ExperimentVariant{}, "claude")
+	if err != nil || name != "claude" {
+		t.Fatalf("default provider = %q err=%v, want claude", name, err)
+	}
+
+	// an unknown provider surfaces an error.
+	if _, _, err := variantProvider(ExperimentConfig{}, ExperimentVariant{Provider: "gemini"}, "codex"); err == nil {
+		t.Fatal("expected error for unknown variant provider")
 	}
 }
 
