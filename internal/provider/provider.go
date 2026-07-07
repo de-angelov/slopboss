@@ -131,7 +131,10 @@ func (codexProvider) Command(ctx context.Context, model string, maxTurns int) *e
 	// no turn-cap flag, so maxTurns is enforced only via the prompt constraints
 	// for this backend.
 	_ = maxTurns
-	args := []string{"exec", "--sandbox", "danger-full-access", "--json"}
+	// --skip-git-repo-check lets codex run in a non-git directory (e.g. the board
+	// root, where the tech quiz writes TECH.md); in dev-agent workspaces it is a
+	// harmless no-op.
+	args := []string{"exec", "--sandbox", "danger-full-access", "--skip-git-repo-check", "--json"}
 	if model != "" {
 		args = append(args, "--model", model)
 	}

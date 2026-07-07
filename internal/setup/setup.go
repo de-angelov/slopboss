@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -14,6 +15,15 @@ import (
 	"github.com/de-angelov/slopboss/internal/config"
 	"github.com/de-angelov/slopboss/internal/provider"
 )
+
+// TechAnswers holds the user's answers to the native tech quiz; the agent turns
+// them into TECH.md headlessly (no interactive TUI).
+type TechAnswers struct {
+	Product      string
+	Stack        string
+	Verification string
+	Conventions  string
+}
 
 // DefaultDevAgents is the number of dev-agent workspaces created when the count
 // is not specified.
@@ -42,10 +52,11 @@ type Options struct {
 	// Provider is the default agent backend (codex/claude) persisted to CONFIG.md
 	// so run/groom/experiment default to it without a flag.
 	Provider string
-	// Interview, when set, is the backend used for the interactive tech-stack
-	// discovery session. Nil skips the interview and leaves the placeholder
-	// TECH.md in place.
+	// Interview, when set, is the backend used to synthesize TECH.md from Tech.
+	// Nil (or a nil Tech) skips the quiz and leaves the placeholder TECH.md.
 	Interview provider.Provider
+	// Tech holds the native quiz answers the backend turns into TECH.md.
+	Tech *TechAnswers
 }
 
 func (o Options) withDefaults() Options {
@@ -120,10 +131,10 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	if opts.Interview != nil && opts.BoardRoot != "" {
+	if opts.Interview != nil && opts.Tech != nil && opts.BoardRoot != "" {
 		fmt.Println()
-		if err := runTechInterview(ctx, opts); err != nil {
-			return fmt.Errorf("tech interview: %w", err)
+		if err := writeTechFromAnswers(ctx, opts); err != nil {
+			return fmt.Errorf("tech quiz: %w", err)
 		}
 	}
 
@@ -137,67 +148,83 @@ func Run(ctx context.Context, opts Options) error {
 	return nil
 }
 
-// runTechInterview launches an interactive Team Lead session, run at the board
-// root so it can inspect the freshly cloned product repo under workspaces/repo-tl
-// and write TECH.md next to the other board files.
-func runTechInterview(ctx context.Context, opts Options) error {
+// writeTechFromAnswers runs the backend headlessly (no interactive TUI) to turn
+// the native quiz answers into TECH.md. Its output goes to a buffer, never the
+// terminal, so there is no TUI double-render; the agent writes ./TECH.md itself.
+func writeTechFromAnswers(ctx context.Context, opts Options) error {
 	p := opts.Interview
-	fmt.Printf("Starting %s tech-stack interview (writes %s)\n", p.Name(), filepath.Join(opts.BoardRoot, "TECH.md"))
+	fmt.Printf("Generating %s with %s from your answers...\n", filepath.Join(filepath.Base(opts.BoardRoot), "TECH.md"), p.Name())
 
-	promptText := buildTechInterviewPrompt(opts)
 	model := p.DefaultModel(config.TeamLeadRole)
-
-	cmd := p.InteractiveCommand(ctx, model, promptText)
+	cmd := p.Command(ctx, model, 0) // headless
 	cmd.Dir = opts.BoardRoot
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
+	cmd.Stdin = strings.NewReader(techSynthesisPrompt(*opts.Tech))
 
-func buildTechInterviewPrompt(opts Options) string {
-	agents := readOrEmpty(filepath.Join(opts.BoardRoot, "AGENTS.md"))
-	teamLead := readOrEmpty(filepath.Join(opts.BoardRoot, "TEAM_LEAD_AGENT.md"))
-
-	return fmt.Sprintf(`You are the Team Lead agent in an INTERACTIVE tech-stack discovery session.
-
-================ AGENTS.md COMMON RULES ================
-
-%s
-
-================ TEAM LEAD INSTRUCTIONS ================
-
-%s
-
-================ TECH DISCOVERY SESSION ================
-
-The product repository was just cloned to ./workspaces/repo-tl (relative to your
-current directory). Your job is to produce ./TECH.md — the product's technical
-standards and verification commands that dev agents will rely on.
-
-Do this:
-- Inspect ./workspaces/repo-tl to detect the stack: read manifests and configs
-  (e.g. package.json, go.mod, pyproject.toml, Cargo.toml, Makefile, CI configs)
-  and note the language/framework, package manager, and how to install, test,
-  build, lint, and typecheck.
-- Ask the user ONE targeted question at a time to confirm or fill gaps
-  (preferred test command, conventions, directory layout, definition of done),
-  and provide your recommended answer with each question.
-- Do NOT modify any files under ./workspaces/**; only inspect them.
-- When the stack is clear, WRITE ./TECH.md with at least these sections:
-  Technology Stack, Install, Test, Build / Typecheck, Lint, and Key Conventions.
-  Prefer exact commands over prose.
-- Begin by summarizing what you detected from the repo, then ask your first
-  question.
-`, agents, teamLead)
-}
-
-func readOrEmpty(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "(not found)"
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %s", err, tail(out.String(), 300))
 	}
-	return string(data)
+
+	fmt.Println("✓ wrote TECH.md")
+	return nil
+}
+
+// techSynthesisPrompt tells the backend to write ./TECH.md from the answers,
+// inferring the mechanical bits (exact commands, layout) rather than asking.
+func techSynthesisPrompt(a TechAnswers) string {
+	return fmt.Sprintf(`Write the file ./TECH.md (in your current working directory) for a new project, using the user's answers below. Do this task only: write that one file, then stop. Do not run other commands, do not print explanations.
+
+Infer the exact install, test, build/typecheck, and lint commands and the conventional directory layout from the stack — fill them in concretely, do not leave placeholders.
+
+Answers:
+- Building: %s
+- Stack: %s
+- Verification / definition of done: %s
+- Conventions / avoid: %s
+
+Write ./TECH.md in EXACTLY this Markdown shape (omit any line that does not apply):
+
+# TECH
+
+<one short paragraph: what this product is>
+
+## Technology Stack
+
+- Language:
+- Framework:
+- Package manager / runtime:
+
+## Commands
+
+- Install:
+- Test:
+- Build / typecheck:
+- Lint / format:
+
+## Conventions
+
+- Directory layout:
+- Testing:
+- Definition of done:
+- Avoid:
+`, emptyDash(a.Product), emptyDash(a.Stack), emptyDash(a.Verification), emptyDash(a.Conventions))
+}
+
+func emptyDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "(not specified — use your best judgement)"
+	}
+	return s
+}
+
+func tail(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) > n {
+		return "..." + s[len(s)-n:]
+	}
+	return s
 }
 
 func createClone(opts Options, dir string) error {

@@ -89,14 +89,23 @@ non-interactively.`,
 			return err
 		}
 
-		// 6. Tech-stack interview.
-		runInterview := !setupSkipInterview
+		// 6. Tech quiz — slopboss asks a few questions natively (instant, no agent
+		//    TUI); the backend then writes TECH.md headlessly from the answers.
+		runQuiz := !setupSkipInterview
 		if !cmd.Flags().Changed("skip-interview") {
-			runInterview = askYesNo(reader, "Run the tech-stack interview now?", true)
+			runQuiz = askYesNo(reader, "Run the tech-stack quiz now?", true)
 		}
 		var interview provider.Provider
-		if runInterview {
+		var tech *setup.TechAnswers
+		if runQuiz {
 			interview, _ = provider.ByName(providerName) // already validated above
+			fmt.Printf("\nTech quiz — a few questions, then %s writes TECH.md:\n", providerName)
+			tech = &setup.TechAnswers{
+				Product:      ask(reader, "What are you building? (one line)", ""),
+				Stack:        ask(reader, "Stack — language, framework, package manager/runtime", ""),
+				Verification: ask(reader, "How is work verified, and what does \"done\" mean?", ""),
+				Conventions:  ask(reader, "Conventions to enforce or things to avoid (optional)", ""),
+			}
 		}
 
 		return setup.Run(cmd.Context(), setup.Options{
@@ -108,6 +117,7 @@ non-interactively.`,
 			BaseBranch:     branch,
 			Provider:       providerName,
 			Interview:      interview,
+			Tech:           tech,
 		})
 	},
 }

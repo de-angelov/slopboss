@@ -46,14 +46,28 @@ Completed work history. Normal orchestrator prompts do not load this file.
 
 	"TECH.md": `# TECH
 
-Product technical standards and verification. This file is normally written by
-the interactive tech interview during "slopboss setup"; edit it freely.
+<one short paragraph: what this product is>. Dev agents rely on this file;
+normally written by the setup tech quiz — edit it freely.
 
-- Language / framework:
+## Technology Stack
+
+- Language:
+- Framework:
+- Package manager / runtime:
+
+## Commands
+
 - Install:
 - Test:
 - Build / typecheck:
-- Key conventions:
+- Lint / format:
+
+## Conventions
+
+- Directory layout:
+- Testing:
+- Definition of done:
+- Avoid:
 `,
 }
 
