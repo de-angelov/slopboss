@@ -84,6 +84,18 @@ Recommended approach: yes.
 	}
 }
 
+func TestValidateSynthesizedTechFileRejectsDefaultPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TECH.md")
+	if err := os.WriteFile(path, []byte(boardTemplates["TECH.md"]), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := validateSynthesizedTechFile(path); err == nil {
+		t.Fatal("expected default placeholder TECH.md to be rejected")
+	}
+}
+
 func TestValidateSynthesizedTechFileAcceptsConcreteStack(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "TECH.md")
