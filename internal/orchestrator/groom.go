@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/de-angelov/slopboss/internal/board"
 	"github.com/de-angelov/slopboss/internal/config"
@@ -47,6 +48,7 @@ func buildGroomPrompt(tasks []board.Task) string {
 	teamLead := board.MustRead(config.TlAgentInstructionsFile)
 	tech := board.MustRead(config.TechFile)
 	boardContext := prompt.BuildTaskContext(teamLeadRole, board.Task{}, tasks)
+	humanDecisionSummary := buildHumanDecisionSummary(tasks)
 
 	return fmt.Sprintf(`You are the Team Lead agent in an INTERACTIVE backlog grooming session.
 
@@ -62,6 +64,10 @@ func buildGroomPrompt(tasks []board.Task) string {
 
 %s
 
+================ HUMAN DECISIONS WAITING ================
+
+%s
+
 ================ CURRENT BOARD ================
 
 %s
@@ -74,5 +80,32 @@ Work interactively with the user to groom the backlog:
 - Reprioritize, split, or clarify backlog items as the user requests.
 - Do NOT implement code, and do NOT modify the Dev Agent lanes in TASKS.md.
 - Begin by asking the user what they would like to add or reprioritize.
-`, common, teamLead, tech, boardContext)
+`, common, teamLead, tech, humanDecisionSummary, boardContext)
+}
+
+func buildHumanDecisionSummary(tasks []board.Task) string {
+	var waiting []board.Task
+	for _, task := range tasks {
+		if task.Section != "Backlog" {
+			continue
+		}
+		if !(task.Status == "Backlog" || task.Status == "" || strings.EqualFold(task.Status, "Blocked")) {
+			continue
+		}
+		if !strings.EqualFold(task.Category, "HITL") {
+			continue
+		}
+		waiting = append(waiting, task)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d task(s) awaiting human decision.\n", len(waiting))
+	for _, task := range waiting {
+		id := strings.TrimSpace(task.ID)
+		if id == "" {
+			id = "no-id"
+		}
+		fmt.Fprintf(&b, "- %s - %s\n", id, task.Title)
+	}
+	return strings.TrimSpace(b.String())
 }
