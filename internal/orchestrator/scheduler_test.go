@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/de-angelov/slopboss/internal/board"
 	"github.com/de-angelov/slopboss/internal/config"
 )
 
@@ -217,6 +218,58 @@ func TestDecideCancel(t *testing.T) {
 		if got := decideCancel(tc.matches, tc.completing, tc.pending, tc.since, now); got != tc.want {
 			t.Errorf("%s: decideCancel = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestTeamLeadScheduleKeyChangesWhenDependencyCompletes(t *testing.T) {
+	oldCount := config.DevAgentCount
+	config.DevAgentCount = 2
+	t.Cleanup(func() { config.DevAgentCount = oldCount })
+
+	task := board.Task{
+		Section:      "Backlog",
+		Title:        "Build next slice",
+		ID:           "CR-014",
+		Status:       "Backlog",
+		Category:     "AFK",
+		Dependencies: "CR-001",
+		Key:          "Backlog\x00Build next slice\x00\x00\x00Backlog",
+	}
+
+	before := teamLeadScheduleKey(task, []board.Task{task}, map[string]bool{})
+	after := teamLeadScheduleKey(task, []board.Task{task}, map[string]bool{"CR-001": true})
+
+	if before == after {
+		t.Fatalf("expected Team Lead schedule key to change when CR-001 becomes done: %q", before)
+	}
+}
+
+func TestTeamLeadScheduleKeyChangesWhenDevLaneEmpties(t *testing.T) {
+	oldCount := config.DevAgentCount
+	config.DevAgentCount = 2
+	t.Cleanup(func() { config.DevAgentCount = oldCount })
+
+	backlog := board.Task{
+		Section: "Backlog",
+		Title:   "Build next slice",
+		ID:      "CR-014",
+		Status:  "Backlog",
+		Key:     "Backlog\x00Build next slice\x00\x00\x00Backlog",
+	}
+	active := board.Task{
+		Section: config.DevAgentSection(1),
+		Title:   "Scaffold app",
+		ID:      "CR-001",
+		Owner:   config.DevAgentRole(1),
+		Status:  "In Progress",
+		Key:     config.DevAgentSection(1) + "\x00Scaffold app\x00" + config.DevAgentRole(1) + "\x00agent/1/scaffold\x00In Progress",
+	}
+
+	busy := teamLeadScheduleKey(backlog, []board.Task{backlog, active}, map[string]bool{})
+	empty := teamLeadScheduleKey(backlog, []board.Task{backlog}, map[string]bool{})
+
+	if busy == empty {
+		t.Fatalf("expected Team Lead schedule key to change when a dev lane empties: %q", busy)
 	}
 }
 

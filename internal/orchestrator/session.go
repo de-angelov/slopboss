@@ -54,9 +54,8 @@ func shutdownSessions() {
 	}
 }
 
-func startSession(role string, task board.Task, tasks []board.Task) {
+func startSession(role string, task board.Task, taskKey string, tasks []board.Task) {
 	ctx, cancel := context.WithCancel(context.Background())
-	taskKey := task.Key
 
 	mu.Lock()
 	running[role] = RunningSession{

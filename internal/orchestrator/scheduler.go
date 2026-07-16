@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -33,28 +34,34 @@ Maintain a single "## Awaiting Human Input" section at the TOP of BACKLOG.md lis
 
 Keep edits minimal and correct, do NOT touch the Dev Agent lanes in TASKS.md, then stop.`
 
+type desiredSession struct {
+	Task    board.Task
+	TaskKey string
+}
+
 func reconcile(tasks []board.Task) {
-	desired := map[string]board.Task{}
+	done := board.CompletedSet()
+	desired := map[string]desiredSession{}
 	invalidRoles := map[string]bool{}
 	var backlogTask *board.Task
 
-	addDesired := func(role string, task board.Task) {
+	addDesired := func(role string, task board.Task, taskKey string) {
 		if invalidRoles[role] {
 			return
 		}
 		if existing, exists := desired[role]; exists {
-			logx.Event("TASKS board error: multiple In Progress tasks for %s (%q and %q); refusing to start role", role, existing.Title, task.Title)
+			logx.Event("TASKS board error: multiple In Progress tasks for %s (%q and %q); refusing to start role", role, existing.Task.Title, task.Title)
 			delete(desired, role)
 			invalidRoles[role] = true
 			return
 		}
-		desired[role] = task
+		desired[role] = desiredSession{Task: task, TaskKey: taskKey}
 	}
 
 	for _, task := range tasks {
 		if role, ok := config.DevAgentRoleForActiveSection(task.Section); ok {
 			if task.Owner == role && task.Status == "In Progress" {
-				addDesired(role, task)
+				addDesired(role, task, task.Key)
 			}
 			continue
 		}
@@ -68,7 +75,7 @@ func reconcile(tasks []board.Task) {
 		backlogTask = &bt
 	}
 
-	if backlogTask != nil && len(invalidRoles) == 0 && board.AllDevAgentsBusy(desired) {
+	if backlogTask != nil && len(invalidRoles) == 0 && allDevAgentsBusyDesired(desired) {
 		backlogTask = nil
 	}
 
@@ -77,21 +84,22 @@ func reconcile(tasks []board.Task) {
 	}
 
 	if backlogTask != nil {
-		desired[teamLeadRole] = *backlogTask
+		desired[teamLeadRole] = desiredSession{
+			Task:    *backlogTask,
+			TaskKey: teamLeadScheduleKey(*backlogTask, tasks, done),
+		}
 	} else if _, taken := desired[teamLeadRole]; !taken && len(invalidRoles) == 0 {
 		// No dependency-ready work. Rather than idle, launch a throttled
 		// decomposition grooming pass if pending work is blocked — the team lead
 		// splits the human-required slice out and converts the rest to AFK, which
 		// board.FirstBacklogTask can then assign. Keyed on the blocked set so it
 		// runs once per distinct set of blockers instead of every poll.
-		if blocked := board.BlockedBacklogIDs(tasks, board.CompletedSet()); len(blocked) > 0 {
-			desired[teamLeadRole] = decompositionTask(blocked)
+		if blocked := board.BlockedBacklogIDs(tasks, done); len(blocked) > 0 {
+			task := decompositionTask(blocked)
+			desired[teamLeadRole] = desiredSession{Task: task, TaskKey: task.Key}
 		}
 	}
 
-	// board.CompletedSet reads files and locks internally, so compute it before
-	// taking mu for the cancel sweep below.
-	done := board.CompletedSet()
 	now := time.Now()
 
 	mu.Lock()
@@ -103,8 +111,8 @@ func reconcile(tasks []board.Task) {
 	}
 
 	for role, session := range running {
-		task, stillDesired := desired[role]
-		matches := stillDesired && task.Key == session.TaskKey
+		desiredSession, stillDesired := desired[role]
+		matches := stillDesired && desiredSession.TaskKey == session.TaskKey
 		// A session whose task has already landed (archived Done, or its squash
 		// commit is on main) is completing normally — never cancel it; let it exit
 		// and remove itself from `running`.
@@ -127,8 +135,9 @@ func reconcile(tasks []board.Task) {
 	}
 	mu.Unlock()
 
-	for role, task := range desired {
-		taskKey := task.Key
+	for role, desiredSession := range desired {
+		task := desiredSession.Task
+		taskKey := desiredSession.TaskKey
 
 		if !git.WorkspaceExists(role) {
 			logx.Event("skipping %s because workspace is missing", role)
@@ -186,8 +195,41 @@ func reconcile(tasks []board.Task) {
 			)
 		}
 
-		startSession(role, task, tasks)
+		startSession(role, task, taskKey, tasks)
 	}
+}
+
+func teamLeadScheduleKey(task board.Task, tasks []board.Task, done map[string]bool) string {
+	activeLaneKeys := make([]string, 0, config.DevAgentCount)
+	for _, task := range tasks {
+		if role, ok := config.DevAgentRoleForActiveSection(task.Section); ok &&
+			task.Owner == role &&
+			task.Status == "In Progress" {
+			activeLaneKeys = append(activeLaneKeys, role+"="+task.Key)
+		}
+	}
+	sort.Strings(activeLaneKeys)
+
+	doneIDs := make([]string, 0, len(done))
+	for id := range done {
+		doneIDs = append(doneIDs, id)
+	}
+	sort.Strings(doneIDs)
+
+	return strings.Join([]string{
+		task.Key,
+		"lanes=" + strings.Join(activeLaneKeys, ","),
+		"done=" + strings.Join(doneIDs, ","),
+	}, "\x00")
+}
+
+func allDevAgentsBusyDesired(desired map[string]desiredSession) bool {
+	for k := 1; k <= config.DevAgentCount; k++ {
+		if _, busy := desired[config.DevAgentRole(k)]; !busy {
+			return false
+		}
+	}
+	return true
 }
 
 // cancelAction is the decision reconcile makes about a running session whose
