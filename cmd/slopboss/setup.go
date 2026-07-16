@@ -44,7 +44,7 @@ non-interactively.`,
 		//    it; otherwise prompt (default cwd) and repoint.
 		if boardDir == "" {
 			cwd, _ := os.Getwd()
-			dir := ask(reader, "Board directory", cwd)
+			dir := ask(reader, "Board directory", defaultSetupBoardDir(cwd))
 			absDir, err := filepath.Abs(strings.TrimSpace(dir))
 			if err != nil {
 				return err
@@ -112,6 +112,21 @@ non-interactively.`,
 			Interview:      interview,
 		})
 	},
+}
+
+func defaultSetupBoardDir(cwd string) string {
+	if isSlopbossSourceCheckout(cwd) {
+		return filepath.Join(filepath.Dir(cwd), "slopboss-board")
+	}
+	return cwd
+}
+
+func isSlopbossSourceCheckout(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "module github.com/de-angelov/slopboss")
 }
 
 // ask prompts for a string, showing the default in brackets and returning it when
