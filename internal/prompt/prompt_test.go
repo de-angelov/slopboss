@@ -101,6 +101,12 @@ func TestDevAgentPromptIncludesTokenGuardrails(t *testing.T) {
 		"avoid adding more test code than implementation code",
 		"If verification reveals unrelated failures, stop and mark the task Blocked",
 		"Set Status: Blocked",
+		"Dependency install discipline",
+		"timeout 10m npm install",
+		"Clean partial install artifacts",
+		"mark the task Blocked in TASKS.md",
+		"commit the corresponding lockfile",
+		"Do not leave package-manager install processes running",
 	} {
 		if !strings.Contains(built, want) {
 			t.Fatalf("prompt missing %q\n%s", want, built)

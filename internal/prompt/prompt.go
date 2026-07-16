@@ -25,6 +25,15 @@ const TestingDisciplineRules = `- Testing discipline: prefer existing test style
 - If the repo lacks jsdom/testing-library, do not invent an interaction harness. Use the existing SSR/render test pattern and state the interaction limit if relevant.
 - Scope budget: for small route/UI tickets, keep test changes close to the changed file and avoid adding more test code than implementation code unless a failing test proves it is necessary.`
 
+// DependencyInstallRules keeps dependency/network stalls from wedging a live dev
+// lane. Package-manager installs are the main long-running command agents issue
+// in greenfield repos; they must either complete, fail visibly, or turn the task
+// into a blocked board item with enough evidence for a human or later unblocker.
+const DependencyInstallRules = `- Dependency install discipline: run package-manager install/update commands with an explicit timeout, for example ` + "`timeout 10m npm install`, `timeout 10m pnpm install`, or the stack-equivalent command." + `
+- If an install/update times out, hangs, or shows registry/network retry errors, stop retrying blindly. Clean partial install artifacts that can poison later runs (for example incomplete node_modules or package-manager temp/cache state), capture the exact failing command/output, and mark the task Blocked in TASKS.md.
+- When package manifests change, commit the corresponding lockfile (` + "`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`, etc.)" + ` or explicitly block on the install failure that prevented generating it.
+- Do not leave package-manager install processes running in the workspace after marking a task blocked or stopping work.`
+
 func DevAgentRuntimeInstructions() string {
 	return `
 Role: Dev Agent
@@ -34,7 +43,7 @@ Runtime Rules:
 - Use the existing repository test stack. If a missing tool or unrelated type error blocks verification, report it instead of expanding scope.
 - If verification reveals unrelated failures, stop and mark the task Blocked in TASKS.md. Do not fix unrelated files.
 - For unrelated verification failures, add or update a [BLOCKED] section with the failing command, exact output, out-of-scope file path, and a suggested narrow unblocker task. Set Status: Blocked and Blocked by: Team Lead triage required unless a blocker task already exists.
-` + TestingDisciplineRules + "\n"
+` + DependencyInstallRules + "\n" + TestingDisciplineRules + "\n"
 }
 
 // BuildPrompt assembles a full session prompt for role/task. The static prefix is

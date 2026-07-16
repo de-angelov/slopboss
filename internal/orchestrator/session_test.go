@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -62,5 +63,25 @@ func TestRecordCodexTokenUsageAccumulatesByRole(t *testing.T) {
 	}
 	if tokenUsageByRole[devAgent2Role] != 7 {
 		t.Fatalf("Dev Agent 2 tokens = %d, want 7", tokenUsageByRole[devAgent2Role])
+	}
+}
+
+func TestPackageManagerTimeoutEnvBoundsNPMFetches(t *testing.T) {
+	env := packageManagerTimeoutEnv([]string{"PATH=/bin"})
+
+	for _, want := range []string{
+		"PATH=/bin",
+		"npm_config_fetch_retries=2",
+		"npm_config_fetch_timeout=120000",
+		"npm_config_fetch_retry_mintimeout=10000",
+		"npm_config_fetch_retry_maxtimeout=30000",
+		"NPM_CONFIG_FETCH_RETRIES=2",
+		"NPM_CONFIG_FETCH_TIMEOUT=120000",
+		"NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=10000",
+		"NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=30000",
+	} {
+		if !slices.Contains(env, want) {
+			t.Fatalf("packageManagerTimeoutEnv missing %q in %v", want, env)
+		}
 	}
 }

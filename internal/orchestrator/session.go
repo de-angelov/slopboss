@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -157,6 +158,9 @@ func runSession(ctx context.Context, role string, workspace string, promptText s
 	cmd := p.Command(ctx, model, maxTurns)
 	cmd.Dir = workspace
 	cmd.Stdin = strings.NewReader(promptText)
+	if role != teamLeadRole {
+		cmd.Env = packageManagerTimeoutEnv(os.Environ())
+	}
 
 	// The monitor only parses; tee the raw stream to the orchestrator log too.
 	monitor := p.NewMonitor()
@@ -192,6 +196,19 @@ func runSession(ctx context.Context, role string, workspace string, promptText s
 
 	logx.Event("%s completed in %s", p.Name(), workspace)
 	return sessionCompleted
+}
+
+func packageManagerTimeoutEnv(base []string) []string {
+	return append(base,
+		"npm_config_fetch_retries=2",
+		"npm_config_fetch_timeout=120000",
+		"npm_config_fetch_retry_mintimeout=10000",
+		"npm_config_fetch_retry_maxtimeout=30000",
+		"NPM_CONFIG_FETCH_RETRIES=2",
+		"NPM_CONFIG_FETCH_TIMEOUT=120000",
+		"NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=10000",
+		"NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=30000",
+	)
 }
 
 func recordCodexTokenUsage(role string, tokens int) {
