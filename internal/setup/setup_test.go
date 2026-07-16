@@ -1,6 +1,8 @@
 package setup
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -42,5 +44,95 @@ func TestOptionsDefaults(t *testing.T) {
 	}
 	if o := (Options{RepoURL: "x", BaseBranch: "develop"}).withDefaults(); o.BaseBranch != "develop" {
 		t.Fatalf("explicit BaseBranch overridden: %q", o.BaseBranch)
+	}
+}
+
+func TestTechSynthesisPromptForbidsContinuingInterview(t *testing.T) {
+	prompt := techSynthesisPrompt(`Q: should we standardize on Next.js, Redis, and Stripe?
+A: yes`)
+
+	for _, want := range []string{
+		"Do not ask follow-up questions",
+		"Treat the transcript as complete",
+		"choose concrete defaults",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("tech synthesis prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestValidateSynthesizedTechFileRejectsFollowUpQuestion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TECH.md")
+	content := `# TECH
+
+The product workspace is greenfield and TECH.md does not define a stack yet, so the first
+blocker is choosing the app skeleton before I split this into ready tasks.
+
+Question: should we standardize on a single Next.js TypeScript app with App Router, API routes
+for backend endpoints, Redis for vote totals, and Stripe Checkout/webhooks for paid votes?
+
+Recommended approach: yes.
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := validateSynthesizedTechFile(path); err == nil {
+		t.Fatal("expected follow-up-question TECH.md to be rejected")
+	}
+}
+
+func TestValidateSynthesizedTechFileAcceptsConcreteStack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TECH.md")
+	content := `# TECH
+
+Country Rank is a single Next.js TypeScript app using App Router for pages and route handlers for backend endpoints.
+
+## Technology Stack
+
+- Language / runtime: TypeScript on Node.js 20.
+- Framework(s): Next.js App Router.
+- Package manager: pnpm.
+- Backend / server: Next.js route handlers.
+- Database / storage: Redis.
+- Key libraries: Stripe SDK, React Testing Library, Vitest.
+
+## Architecture
+
+Pages and server endpoints live in one app.
+
+## Coding Standards
+
+- Use strict TypeScript.
+
+## Commands
+
+- Install: pnpm install
+- Test: pnpm test
+- Build / typecheck: pnpm build && pnpm typecheck
+- Lint / format: pnpm lint && pnpm format
+- Other (migrations, codegen, seeds): none
+
+## Testing
+
+- Test stack: Vitest and Playwright.
+- What must be covered (and the coverage/verification bar): unit tests for logic and e2e tests for voting flows.
+- Where tests live: colocated *.test.ts files and tests/e2e.
+
+## Conventions
+
+- Directory layout: app/, components/, lib/, tests/.
+- Definition of done: tests and build pass.
+- Avoid: untyped API payloads.
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := validateSynthesizedTechFile(path); err != nil {
+		t.Fatalf("expected concrete TECH.md to be accepted: %v", err)
 	}
 }

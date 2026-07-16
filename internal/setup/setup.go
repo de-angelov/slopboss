@@ -256,7 +256,7 @@ func writeTechFile(ctx context.Context, opts Options, transcript string) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%w: %s", err, tail(out.String(), 300))
 	}
-	return nil
+	return validateSynthesizedTechFile(filepath.Join(opts.BoardRoot, "TECH.md"))
 }
 
 // techSynthesisPrompt tells the backend to write an in-depth ./TECH.md from the
@@ -270,6 +270,8 @@ func techSynthesisPrompt(transcript string) string {
 		convo = "(no answers were given — use sensible, widely-used defaults)"
 	}
 	return fmt.Sprintf(`Write the file ./TECH.md (in your current working directory) for a new project, using the interview below. Do this task only: write that one file, then stop. Do not run other commands, do not print explanations.
+
+Treat the transcript as complete, even if it ends with an unanswered recommendation or an uncertain answer. Do not ask follow-up questions, do not write "Question:" prompts, and do not recommend that a human choose the stack later. If the interview leaves a gap, choose concrete defaults that fit the answers and state them as decisions in TECH.md.
 
 Make it genuinely useful and in-depth — a dev agent should be able to implement and verify a task from it alone. Infer everything mechanical from the stack: the exact install/test/build/typecheck/lint (and any migration/codegen) commands, the conventional directory layout, and the coding/testing standards typical for that stack. Fill every section concretely; do not leave angle-bracket placeholders. You may use fenced code blocks for commands and add sub-bullets where it helps. Do NOT include git/branching/board-workflow rules — those live in AGENTS.md and DEV_AGENT.md.
 
@@ -319,6 +321,46 @@ A few sentences on layers, data flow, and module boundaries.
 - Definition of done:
 - Avoid:
 `, convo)
+}
+
+func validateSynthesizedTechFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("validate TECH.md: %w", err)
+	}
+	content := strings.TrimSpace(string(data))
+	lower := strings.ToLower(content)
+	if !strings.HasPrefix(content, "# TECH") {
+		return fmt.Errorf("TECH.md was not synthesized: missing # TECH heading")
+	}
+	for _, marker := range []string{
+		"## Technology Stack",
+		"## Architecture",
+		"## Commands",
+		"## Testing",
+		"## Conventions",
+	} {
+		if !strings.Contains(content, marker) {
+			return fmt.Errorf("TECH.md was not synthesized: missing %s", marker)
+		}
+	}
+	for _, bad := range []string{
+		"question:",
+		"recommended approach:",
+		"blocker is choosing",
+		"should we standardize",
+		"does not define a stack yet",
+		"<todo",
+		"<stack",
+		"<project",
+		"<command",
+		"<fill",
+	} {
+		if strings.Contains(lower, bad) {
+			return fmt.Errorf("TECH.md still looks like an interview prompt or placeholder; please re-run setup or edit TECH.md")
+		}
+	}
+	return nil
 }
 
 func tail(s string, n int) string {
