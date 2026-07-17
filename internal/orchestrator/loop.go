@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"os/signal"
 	"syscall"
 	"time"
@@ -59,8 +60,15 @@ func RunLoop(parent context.Context, providerName string, ui UI) error {
 				// that landed on main but was never archived still counts as done
 				// for dependency resolution and cancellation this tick.
 				board.RefreshMergedMainIDs()
+				issues := board.RefreshArchiveCompletionIssues()
+				for _, issue := range issues {
+					logx.Event("archive verification failed: %s", issue.Error())
+				}
 				reconcile(tasks)
 				ui.SetTasks(tasks)
+				if len(issues) > 0 {
+					ui.SetError(fmt.Errorf("archive verification failed: %s", issues[0].Error()))
+				}
 			}
 			ui.Refresh()
 

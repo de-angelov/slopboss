@@ -177,18 +177,15 @@ func CompletedContextIDs() []string {
 // done. Scanning only the "Task ID:" lines gives grooming that signal at a tiny
 // fraction of the tokens a full archive read would cost.
 func completedTaskIDs() []string {
-	data, err := fileCache.Read(config.ArchiveFile)
-	if err != nil {
-		return nil
+	invalid := map[string]bool{}
+	for _, issue := range ArchiveCompletionIssues() {
+		invalid[issue.TaskID] = true
 	}
 
 	var ids []string
-	for _, line := range strings.Split(data, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "Task ID:") {
-			if id := strings.TrimSpace(strings.TrimPrefix(trimmed, "Task ID:")); id != "" {
-				ids = append(ids, id)
-			}
+	for _, completion := range archivedCompletions() {
+		if completion.id != "" && !invalid[completion.id] {
+			ids = append(ids, completion.id)
 		}
 	}
 	return ids

@@ -188,6 +188,17 @@ func MainCommitSubjects(workspace string, limit int) []string {
 	return subjects
 }
 
+// MainContainsCommit reports whether commit is reachable from origin/<base>.
+// It reads the workspace's already-fetched origin ref and does not fetch.
+func MainContainsCommit(workspace string, commit string) bool {
+	if strings.TrimSpace(commit) == "" {
+		return false
+	}
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", commit, "origin/"+config.BaseBranch)
+	cmd.Dir = workspace
+	return cmd.Run() == nil
+}
+
 func GitOutput(workspace string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = workspace

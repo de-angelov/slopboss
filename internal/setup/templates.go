@@ -217,11 +217,13 @@ Before marking work complete:
 3. Push the task branch.
 4. Squash-merge the completed branch into product %[1]s.
 5. Push product %[1]s.
-6. Record verification and merge notes in the task.
-7. Move the completed task from TASKS.md to ARCHIVE.md.
-8. Set Status: Done.
-9. Add Completed: YYYY-MM-DD.
-10. Confirm the task no longer appears in TASKS.md.
+6. Fetch product %[1]s and verify the recorded squash commit is reachable from
+   origin/%[1]s with: git merge-base --is-ancestor <squash-commit> origin/%[1]s.
+7. Record verification and merge notes in the task, including the squash commit.
+8. Move the completed task from TASKS.md to ARCHIVE.md.
+9. Set Status: Done.
+10. Add Completed: YYYY-MM-DD.
+11. Confirm the task no longer appears in TASKS.md.
 
 If work cannot be completed or merged, append a [REJECTED] section to the task
 body with the failing command, exact output, and a short explanation of what
