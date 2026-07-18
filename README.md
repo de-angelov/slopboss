@@ -52,7 +52,7 @@ commit** — no database, no hidden state.
 - 🔌 **Pluggable backends** — run on **Codex** (default) or **Claude Code** with a flag.
 - 🧪 **Built-in evals** — A/B different models and prompts on the same ticket
   in isolated worktrees and get a token/diff report.
-- 📺 **Live TUI** — watch every agent, its current task, status, and token usage in real time.
+- 📺 **Live TUI** — watch every agent, its current task, status, and branch in real time.
 - 🛟 **Resilient by design** — merge detection, retry/backoff on failures, and
   usage-limit cooldowns are all handled for you.
 

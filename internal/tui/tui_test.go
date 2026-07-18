@@ -43,7 +43,7 @@ func TestAgentUIRenderPopulatesTable(t *testing.T) {
 		if got := ui.table.GetCell(r, 2).Text; got != "In Progress" {
 			t.Fatalf("Dev Agent 1 status = %q, want In Progress", got)
 		}
-		if got := ui.table.GetCell(r, 4).Text; got != "Build auth" {
+		if got := ui.table.GetCell(r, 3).Text; got != "Build auth" {
 			t.Fatalf("Dev Agent 1 task = %q, want Build auth", got)
 		}
 	}

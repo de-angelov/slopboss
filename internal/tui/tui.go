@@ -101,7 +101,7 @@ func (u *AgentUI) render() {
 	u.header.SetText(head)
 
 	u.table.Clear()
-	for c, title := range []string{"", "ROLE", "STATUS", "TOKENS", "TASK", "BRANCH"} {
+	for c, title := range []string{"", "ROLE", "STATUS", "TASK", "BRANCH"} {
 		u.table.SetCell(0, c, tview.NewTableCell(title).
 			SetTextColor(tcell.ColorYellow).
 			SetAttributes(tcell.AttrBold).
@@ -112,9 +112,8 @@ func (u *AgentUI) render() {
 		u.table.SetCell(r, 0, tview.NewTableCell(row.marker).SetTextColor(tcell.ColorGreen))
 		u.table.SetCell(r, 1, tview.NewTableCell(row.role))
 		u.table.SetCell(r, 2, tview.NewTableCell(row.status).SetTextColor(statusColor(row.status)))
-		u.table.SetCell(r, 3, tview.NewTableCell(formatTokenCount(row.tokens)).SetAlign(tview.AlignRight))
-		u.table.SetCell(r, 4, tview.NewTableCell(tview.Escape(truncate(row.task, 48))).SetExpansion(1))
-		u.table.SetCell(r, 5, tview.NewTableCell(tview.Escape(truncate(row.branch, 36))))
+		u.table.SetCell(r, 3, tview.NewTableCell(tview.Escape(truncate(row.task, 48))).SetExpansion(1))
+		u.table.SetCell(r, 4, tview.NewTableCell(tview.Escape(truncate(row.branch, 36))))
 	}
 
 	u.footer.SetText(fmt.Sprintf("latest: %s\n[gray]press q or Ctrl-C to stop[-]", tview.Escape(logx.LatestLogLine())))

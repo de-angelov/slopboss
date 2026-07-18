@@ -82,10 +82,9 @@ func RunLoop(parent context.Context, providerName string, ui UI) error {
 
 	// Fast display refresh: re-read the board and redraw on UIRefreshInterval so
 	// board changes (an agent picking up a task, a status flip) and asynchronous
-	// state (sessions starting/finishing, token counts) surface within
-	// UIRefreshInterval instead of only at the poll period. Reads are cheap here
-	// because ReadBoardTasks is mtime/size cached; session reconciliation stays on
-	// PollInterval in the goroutine above.
+	// session state surface within UIRefreshInterval instead of only at the poll
+	// period. Reads are cheap here because ReadBoardTasks is mtime/size cached;
+	// session reconciliation stays on PollInterval in the goroutine above.
 	go func() {
 		ticker := time.NewTicker(config.UIRefreshInterval)
 		defer ticker.Stop()

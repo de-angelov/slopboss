@@ -12,7 +12,6 @@ type agentRow struct {
 	marker string
 	role   string
 	status string
-	tokens int
 	task   string
 	branch string
 }
@@ -26,8 +25,6 @@ func buildRows(tasks []board.Task, snap orchestrator.StateSnapshot) []agentRow {
 	}
 
 	for i := range rows {
-		rows[i].tokens = snap.TokenTotals[rows[i].role]
-
 		if session, ok := snap.Running[rows[i].role]; ok {
 			rows[i].marker = ">"
 			rows[i].status = "running"
@@ -71,13 +68,6 @@ func buildRows(tasks []board.Task, snap orchestrator.StateSnapshot) []agentRow {
 	}
 
 	return rows
-}
-
-func formatTokenCount(tokens int) string {
-	if tokens == 0 {
-		return "-"
-	}
-	return fmt.Sprintf("%d", tokens)
 }
 
 func truncate(s string, limit int) string {

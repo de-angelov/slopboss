@@ -48,24 +48,6 @@ func TestShutdownSessionsCancelsAndDrains(t *testing.T) {
 	}
 }
 
-func TestRecordCodexTokenUsageAccumulatesByRole(t *testing.T) {
-	withRetryTestState(t)
-
-	recordCodexTokenUsage(devAgent1Role, 100)
-	recordCodexTokenUsage(devAgent1Role, 25)
-	recordCodexTokenUsage(devAgent2Role, 7)
-
-	mu.Lock()
-	defer mu.Unlock()
-
-	if tokenUsageByRole[devAgent1Role] != 125 {
-		t.Fatalf("Dev Agent 1 tokens = %d, want 125", tokenUsageByRole[devAgent1Role])
-	}
-	if tokenUsageByRole[devAgent2Role] != 7 {
-		t.Fatalf("Dev Agent 2 tokens = %d, want 7", tokenUsageByRole[devAgent2Role])
-	}
-}
-
 func TestPackageManagerTimeoutEnvBoundsNPMFetches(t *testing.T) {
 	env := packageManagerTimeoutEnv([]string{"PATH=/bin"})
 

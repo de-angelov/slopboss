@@ -34,7 +34,6 @@ var (
 	running                  = map[string]RunningSession{}
 	finished                 = map[string]FinishedSession{}
 	failedSessionRetryCounts = map[string]int{}
-	tokenUsageByRole         = map[string]int{}
 	codexPausedUntil         time.Time
 
 	// cancelPendingSince records when a running session first stopped matching
@@ -83,7 +82,6 @@ const (
 type StateSnapshot struct {
 	Running      map[string]RunningSession
 	Finished     map[string]FinishedSession
-	TokenTotals  map[string]int
 	ProviderName string
 }
 
@@ -93,18 +91,14 @@ func Snapshot() StateSnapshot {
 	defer mu.Unlock()
 
 	snap := StateSnapshot{
-		Running:     make(map[string]RunningSession, len(running)),
-		Finished:    make(map[string]FinishedSession, len(finished)),
-		TokenTotals: make(map[string]int, len(tokenUsageByRole)),
+		Running:  make(map[string]RunningSession, len(running)),
+		Finished: make(map[string]FinishedSession, len(finished)),
 	}
 	for k, v := range running {
 		snap.Running[k] = v
 	}
 	for k, v := range finished {
 		snap.Finished[k] = v
-	}
-	for k, v := range tokenUsageByRole {
-		snap.TokenTotals[k] = v
 	}
 	if sessionProvider != nil {
 		snap.ProviderName = sessionProvider.Name()

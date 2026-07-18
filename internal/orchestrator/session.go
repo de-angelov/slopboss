@@ -175,7 +175,6 @@ func runSession(ctx context.Context, role string, workspace string, promptText s
 
 	err := cmd.Run()
 	usage := monitor.Breakdown()
-	recordCodexTokenUsage(role, usage.Total)
 	logCodexTokenBreakdown(role, usage)
 
 	if ctx.Err() == context.Canceled {
@@ -208,19 +207,6 @@ func packageManagerTimeoutEnv(base []string) []string {
 		"NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=10000",
 		"NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=30000",
 	)
-}
-
-func recordCodexTokenUsage(role string, tokens int) {
-	if tokens == 0 {
-		return
-	}
-
-	mu.Lock()
-	tokenUsageByRole[role] += tokens
-	cumulative := tokenUsageByRole[role]
-	mu.Unlock()
-
-	logx.Event("%s tokens used in last session: %d; cumulative: %d", role, tokens, cumulative)
 }
 
 // logCodexTokenBreakdown surfaces where a session's tokens actually went. A large

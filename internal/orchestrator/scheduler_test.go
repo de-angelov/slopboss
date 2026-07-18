@@ -279,13 +279,11 @@ func withRetryTestState(t *testing.T) {
 	oldLogFilePath := config.LogFilePath
 	config.LogFilePath = filepath.Join(t.TempDir(), "orchestrator.log")
 	failedSessionRetryCounts = map[string]int{}
-	tokenUsageByRole = map[string]int{}
 	codexPausedUntil = time.Time{}
 
 	t.Cleanup(func() {
 		config.LogFilePath = oldLogFilePath
 		failedSessionRetryCounts = map[string]int{}
-		tokenUsageByRole = map[string]int{}
 		codexPausedUntil = time.Time{}
 	})
 }
