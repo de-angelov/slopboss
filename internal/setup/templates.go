@@ -136,6 +136,8 @@ debugging, exploratory edits, or routine commands.
 
     BACKLOG.md -> TASKS.md active lane -> ARCHIVE.md
 
+- Pending assignable backlog tasks must use Status: Backlog. "Ready" is a
+  readiness concept, not a valid backlog Status value.
 - Backlog work becomes active when the Team Lead Agent moves it from BACKLOG.md
   into a dev-agent lane in TASKS.md.
 - Blocked work stays in its dev-agent lane until fixed or reassigned. Blocked
@@ -325,12 +327,18 @@ is defined, dependencies are resolved, acceptance criteria are testable, a
 verification command exists, and it fits the complexity budget. Otherwise keep it
 in BACKLOG.md.
 
+READY is a readiness concept, not a metadata Status. A ready unassigned task in
+BACKLOG.md must still use Status: Backlog so the scheduler can assign it.
+
 ## Task Definition
 
 Every task must include: Task ID, Category (AFK/HITL), Owner, Branch, Status,
 Dependencies, Blocking tasks, and body sections for Objective (one sentence),
 Scope, Out of Scope, Acceptance Criteria, and Verification (the exact command or
 steps). Implementation agents should never need to infer missing scope.
+
+Use Status: Backlog for unassigned tasks in BACKLOG.md. Do not write
+Status: Ready.
 
 ## Assignment Workflow
 

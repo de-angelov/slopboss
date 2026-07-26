@@ -87,6 +87,31 @@ func TestAgentsTemplateIsGenericAndCountAware(t *testing.T) {
 	}
 }
 
+func TestAgentsTemplateDocumentsBacklogStatusVocabulary(t *testing.T) {
+	got := agentsTemplate(2)
+	for _, want := range []string{
+		"Pending assignable backlog tasks must use Status: Backlog.",
+		"readiness concept, not a valid backlog Status value.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("AGENTS.md template missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestTeamLeadTemplateDocumentsReadyIsNotAStatus(t *testing.T) {
+	got := teamLeadTemplate
+	for _, want := range []string{
+		"READY is a readiness concept, not a metadata Status.",
+		"Use Status: Backlog for unassigned tasks in BACKLOG.md. Do not write",
+		"Status: Ready.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("TEAM_LEAD_AGENT.md template missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestDevAgentTemplateUsesBaseBranch(t *testing.T) {
 	got := devAgentTemplate("develop")
 	if !strings.Contains(got, "squash-merged into product develop") {
