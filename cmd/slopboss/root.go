@@ -30,8 +30,8 @@ var rootCmd = &cobra.Command{
 	Short: "slopboss orchestrates a multi-agent development workflow",
 	Long: `slopboss drives a board-based multi-agent development workflow.
 
-It reconciles a markdown task board against running agent sessions (Codex or
-Claude Code), prepares the per-agent workspaces, and runs model/prompt/backend
+It reconciles a markdown task board against running agent sessions (Codex,
+Claude Code, or OpenCode), prepares the per-agent workspaces, and runs model/prompt/backend
 evals.
 
 By default slopboss operates on the board in the current directory; use --dir to

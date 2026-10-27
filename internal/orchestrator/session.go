@@ -174,8 +174,8 @@ func runSession(ctx context.Context, role string, workspace string, promptText s
 	logx.Event("running %s session in %s with model %s", p.Name(), workspace, modelLabel)
 
 	err := cmd.Run()
-	usage := monitor.Breakdown()
-	logCodexTokenBreakdown(role, usage)
+	usage := provider.FinalUsage(ctx, p, monitor)
+	logTokenBreakdown(role, usage)
 
 	if ctx.Err() == context.Canceled {
 		logx.Event("%s session cancelled in %s", p.Name(), workspace)
@@ -184,9 +184,15 @@ func runSession(ctx context.Context, role string, workspace string, promptText s
 
 	if err != nil {
 		if monitor.UsageLimited() {
-			pauseCodexLaunchesAfterUsageLimit(time.Now())
+			pauseLaunchesAfterUsageLimit(time.Now())
 			logx.Event("%s usage limit reached in %s: %v", p.Name(), workspace, err)
 			return sessionUsageLimited
+		}
+		if reporter, ok := monitor.(provider.ErrorReporter); ok {
+			if msg := reporter.ErrorMessage(); msg != "" {
+				logx.Event("%s failed in %s: %v (%s)", p.Name(), workspace, err, msg)
+				return sessionFailed
+			}
 		}
 		logx.Event("%s failed in %s: %v", p.Name(), workspace, err)
 		return sessionFailed
@@ -209,12 +215,12 @@ func packageManagerTimeoutEnv(base []string) []string {
 	)
 }
 
-// logCodexTokenBreakdown surfaces where a session's tokens actually went. A large
+// logTokenBreakdown surfaces where a session's tokens actually went. A large
 // total is often dominated by cached_input (cheap re-sends of the growing
 // transcript); the fresh input, output, and reasoning tokens are what drive cost.
 // Splitting them out makes it clear whether a ~1M-token session is expensive or
 // mostly cache reads.
-func logCodexTokenBreakdown(role string, usage provider.TokenBreakdown) {
+func logTokenBreakdown(role string, usage provider.TokenBreakdown) {
 	if usage.Total == 0 && usage.Input == 0 && usage.Output == 0 {
 		return
 	}

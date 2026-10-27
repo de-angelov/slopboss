@@ -1,10 +1,13 @@
-// Package provider abstracts the agent backend CLI (Codex, Claude Code) behind a
-// common interface so the orchestrator loop can drive either. The backend is
-// selected once at startup via the --provider flag; codex is the default.
+// Package provider abstracts the agent backend CLI (Codex, Claude Code,
+// OpenCode) behind a common interface so the orchestrator loop can drive any of
+// them. The backend is selected once at startup via the --provider flag; codex
+// is the default.
 package provider
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -76,6 +79,41 @@ type Monitor interface {
 	FinalMessage() string
 }
 
+// SessionIDer is implemented by monitors that learn the backend's session ID from
+// the event stream. The ID lets providers look up final usage out of band when
+// the stream omits the terminal usage event.
+type SessionIDer interface {
+	SessionID() string
+}
+
+// SessionUsageFetcher is implemented by providers that can look up final session
+// usage out of band (e.g. when the stream omits the terminal usage event).
+type SessionUsageFetcher interface {
+	FetchUsage(ctx context.Context, sessionID string) (TokenBreakdown, error)
+}
+
+// ErrorReporter is implemented by monitors that can surface a structured backend
+// error message (e.g. OpenCode's error event).
+type ErrorReporter interface {
+	ErrorMessage() string
+}
+
+// FinalUsage returns the monitor's token breakdown, preferring an out-of-band
+// fetch when the provider and monitor support it. Backends whose stream always
+// carries the final usage (codex, claude) are unaffected.
+func FinalUsage(ctx context.Context, p Provider, m Monitor) TokenBreakdown {
+	if ider, ok := m.(SessionIDer); ok {
+		if id := ider.SessionID(); id != "" {
+			if fetcher, ok := p.(SessionUsageFetcher); ok {
+				if usage, err := fetcher.FetchUsage(ctx, id); err == nil && usage.Total > 0 {
+					return usage
+				}
+			}
+		}
+	}
+	return m.Breakdown()
+}
+
 // newBackendCmd builds the backend process in its own process group and, when
 // the context is cancelled, kills the entire group. Backends (codex/claude)
 // spawn child shells, test runners, and build tools; without a group kill those
@@ -103,8 +141,10 @@ func ByName(name string) (Provider, error) {
 		return codexProvider{}, nil
 	case "claude":
 		return claudeProvider{}, nil
+	case "opencode":
+		return opencodeProvider{}, nil
 	default:
-		return nil, fmt.Errorf("unknown provider %q (want %q or %q)", name, "codex", "claude")
+		return nil, fmt.Errorf("unknown provider %q (want %q, %q, or %q)", name, "codex", "claude", "opencode")
 	}
 }
 
@@ -230,4 +270,96 @@ func (claudeProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec
 		args = append(args, "--model", spec.Model)
 	}
 	return newBackendCmd(ctx, "claude", args...)
+}
+
+// ---------------------------------------------------------------------------
+// OpenCode
+// ---------------------------------------------------------------------------
+
+type opencodeProvider struct{}
+
+func (opencodeProvider) Name() string { return "opencode" }
+
+func (opencodeProvider) DefaultModel(role string) string {
+	// Defer to the user's configured OpenCode model (provider/model#variant).
+	_ = role
+	return ""
+}
+
+func (opencodeProvider) NewMonitor() Monitor { return &opencodeOutputMonitor{} }
+
+func (opencodeProvider) Command(ctx context.Context, model string, maxTurns int) *exec.Cmd {
+	// opencode run is headless; --format json emits the structured event stream
+	// parsed by opencodeOutputMonitor; --auto approves permissions for unattended
+	// runs. maxTurns has no opencode equivalent, so it is ignored. The prompt is
+	// read from stdin (no positional message).
+	_ = maxTurns
+	args := []string{"run", "--format", "json", "--auto"}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	return newBackendCmd(ctx, "opencode", args...)
+}
+
+func (opencodeProvider) InteractiveCommand(ctx context.Context, model string, prompt string) *exec.Cmd {
+	// No `run` subcommand -> interactive TUI; --prompt seeds the first message.
+	// OpenCode's interactive CLI has no --model flag, so it defers to the user's
+	// configured OpenCode model.
+	_ = model
+	args := []string{"--auto", "--prompt", prompt}
+	return exec.CommandContext(ctx, "opencode", args...)
+}
+
+func (opencodeProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec) *exec.Cmd {
+	// OpenCode runs headless with the same JSON output the orchestrator uses, so
+	// opencodeOutputMonitor parses token usage and the final message from it.
+	// Profile/Config/LastMessageFile have no OpenCode equivalent and are ignored
+	// (final message comes from the event stream).
+	args := []string{"run", "--format", "json", "--auto"}
+	if spec.Model != "" {
+		args = append(args, "--model", spec.Model)
+	}
+	return newBackendCmd(ctx, "opencode", args...)
+}
+
+func (opencodeProvider) FetchUsage(ctx context.Context, sessionID string) (TokenBreakdown, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return TokenBreakdown{}, fmt.Errorf("opencode session id is required")
+	}
+	cmd := exec.CommandContext(ctx, "opencode", "session", "export", sessionID)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return TokenBreakdown{}, fmt.Errorf("opencode session export %s: %w: %s", sessionID, err, strings.TrimSpace(stderr.String()))
+	}
+
+	var doc struct {
+		Info struct {
+			Tokens struct {
+				Input     int `json:"input"`
+				Output    int `json:"output"`
+				Reasoning int `json:"reasoning"`
+				Cache     struct {
+					Read  int `json:"read"`
+					Write int `json:"write"`
+				} `json:"cache"`
+			} `json:"tokens"`
+		} `json:"info"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		return TokenBreakdown{}, fmt.Errorf("parse opencode session export: %w", err)
+	}
+
+	t := doc.Info.Tokens
+	cached := t.Cache.Read + t.Cache.Write
+	input := t.Input + cached
+	output := t.Output + t.Reasoning
+	return TokenBreakdown{
+		Input:           input,
+		CachedInput:     cached,
+		Output:          output,
+		ReasoningOutput: t.Reasoning,
+		Total:           input + output,
+	}, nil
 }

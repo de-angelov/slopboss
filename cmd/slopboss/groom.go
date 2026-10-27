@@ -28,5 +28,5 @@ separate from the autonomous "run" loop.`,
 }
 
 func init() {
-	groomCmd.Flags().StringVar(&groomProvider, "provider", "", "agent backend: codex or claude (default: configured provider)")
+	groomCmd.Flags().StringVar(&groomProvider, "provider", "", "agent backend: codex, claude, or opencode (default: configured provider)")
 }

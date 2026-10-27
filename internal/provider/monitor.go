@@ -302,3 +302,209 @@ func (w *claudeOutputMonitor) FinalMessage() string {
 	}
 	return w.finalMessage
 }
+
+// ---------------------------------------------------------------------------
+// OpenCode
+// ---------------------------------------------------------------------------
+
+// opencodeOutputMonitor parses OpenCode's `run --format json` output. Each
+// step_finish event carries that step's token usage; the final step_finish can
+// be omitted, in which case the provider falls back to `opencode session export`.
+// The terminal assistant text arrives as one or more `text` events.
+type opencodeOutputMonitor struct {
+	mu           sync.Mutex
+	line         string
+	sessionID    string
+	usage        TokenBreakdown
+	usageLimited bool
+	errorMessage string
+	finalMessage string
+	textMessage  string
+	textParts    []opencodeTextPart
+}
+
+type opencodeTextPart struct {
+	id   string
+	text string
+}
+
+func (w *opencodeOutputMonitor) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	for _, r := range string(p) {
+		if r == '\n' {
+			w.consumeLineLocked(w.line)
+			w.line = ""
+			continue
+		}
+		if r != '\r' {
+			w.line += string(r)
+		}
+	}
+	w.mu.Unlock()
+
+	return len(p), nil
+}
+
+func (w *opencodeOutputMonitor) consumeLineLocked(line string) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "{") {
+		return
+	}
+
+	var event struct {
+		Type      string `json:"type"`
+		SessionID string `json:"sessionID"`
+		Part      struct {
+			ID        string `json:"id"`
+			SessionID string `json:"sessionID"`
+			MessageID string `json:"messageID"`
+			Type      string `json:"type"`
+			Text      string `json:"text"`
+			Tokens    struct {
+				Input     int `json:"input"`
+				Output    int `json:"output"`
+				Reasoning int `json:"reasoning"`
+				Cache     struct {
+					Read  int `json:"read"`
+					Write int `json:"write"`
+				} `json:"cache"`
+			} `json:"tokens"`
+		} `json:"part"`
+		Error struct {
+			Type       string `json:"type"`
+			Message    string `json:"message"`
+			Status     int    `json:"status"`
+			RetryAfter int    `json:"retryAfterMs"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &event); err != nil {
+		return
+	}
+
+	if event.SessionID != "" {
+		w.sessionID = event.SessionID
+	} else if event.Part.SessionID != "" {
+		w.sessionID = event.Part.SessionID
+	}
+
+	switch event.Type {
+	case "text":
+		part := event.Part
+		if part.Text == "" {
+			break
+		}
+		if part.MessageID != "" && part.MessageID != w.textMessage {
+			w.textMessage = part.MessageID
+			w.textParts = nil
+		}
+		if part.ID != "" {
+			updated := false
+			for i := range w.textParts {
+				if w.textParts[i].id == part.ID {
+					w.textParts[i].text = part.Text
+					updated = true
+					break
+				}
+			}
+			if !updated {
+				w.textParts = append(w.textParts, opencodeTextPart{id: part.ID, text: part.Text})
+			}
+		} else {
+			w.textParts = append(w.textParts, opencodeTextPart{text: part.Text})
+		}
+
+		var b strings.Builder
+		for i, tp := range w.textParts {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(tp.text)
+		}
+		w.finalMessage = b.String()
+	case "step_finish":
+		t := event.Part.Tokens
+		cached := t.Cache.Read + t.Cache.Write
+		input := t.Input + cached
+		output := t.Output + t.Reasoning
+		w.usage.Input += input
+		w.usage.CachedInput += cached
+		w.usage.Output += output
+		w.usage.ReasoningOutput += t.Reasoning
+		w.usage.Total += input + output
+	case "error":
+		msg := event.Error.Message
+		if msg == "" {
+			msg = event.Error.Type
+		}
+		if msg != "" {
+			w.errorMessage = msg
+		}
+		if isOpenCodeUsageLimited(event.Error.Type, event.Error.Status) {
+			w.usageLimited = true
+		}
+	}
+}
+
+func (w *opencodeOutputMonitor) Breakdown() TokenBreakdown {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if strings.TrimSpace(w.line) != "" {
+		w.consumeLineLocked(w.line)
+		w.line = ""
+	}
+	return w.usage
+}
+
+func (w *opencodeOutputMonitor) TokenTotal() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if strings.TrimSpace(w.line) != "" {
+		w.consumeLineLocked(w.line)
+		w.line = ""
+	}
+	return w.usage.Total
+}
+
+func (w *opencodeOutputMonitor) UsageLimited() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.usageLimited
+}
+
+func (w *opencodeOutputMonitor) FinalMessage() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if strings.TrimSpace(w.line) != "" {
+		w.consumeLineLocked(w.line)
+		w.line = ""
+	}
+	return w.finalMessage
+}
+
+func (w *opencodeOutputMonitor) SessionID() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.sessionID
+}
+
+func (w *opencodeOutputMonitor) ErrorMessage() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.errorMessage
+}
+
+func isOpenCodeUsageLimited(errorType string, status int) bool {
+	switch strings.ToLower(strings.TrimSpace(errorType)) {
+	case "provider.rate-limit", "provider.quota", "rate-limit", "quota", "rate_limit":
+		return true
+	}
+	if status == 429 {
+		return true
+	}
+	lower := strings.ToLower(errorType)
+	return strings.Contains(lower, "rate") && strings.Contains(lower, "limit") ||
+		strings.Contains(lower, "quota")
+}

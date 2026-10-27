@@ -331,8 +331,8 @@ func shouldResumeAfterUsageLimitLocked(session FinishedSession, now time.Time) b
 	return session.Outcome == sessionUsageLimited && !codexPauseActiveLocked(now)
 }
 
-func pauseCodexLaunchesAfterUsageLimit(now time.Time) time.Time {
-	until := now.Add(config.CodexUsageLimitCooldown)
+func pauseLaunchesAfterUsageLimit(now time.Time) time.Time {
+	until := now.Add(config.UsageLimitCooldown)
 
 	mu.Lock()
 	if until.After(codexPausedUntil) {
@@ -341,6 +341,10 @@ func pauseCodexLaunchesAfterUsageLimit(now time.Time) time.Time {
 	activeUntil := codexPausedUntil
 	mu.Unlock()
 
-	logx.Event("pausing Codex launches after usage-limit error until %s", activeUntil.Format(time.RFC3339))
+	logx.Event("pausing launches after usage-limit error until %s", activeUntil.Format(time.RFC3339))
 	return activeUntil
+}
+
+func pauseCodexLaunchesAfterUsageLimit(now time.Time) time.Time {
+	return pauseLaunchesAfterUsageLimit(now)
 }

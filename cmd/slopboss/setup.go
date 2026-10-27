@@ -83,7 +83,7 @@ non-interactively.`,
 		// 5. Agent backend (persisted so run/groom/experiment default to it).
 		providerName := setupProvider
 		if !cmd.Flags().Changed("provider") {
-			providerName = ask(reader, "Agent backend (codex/claude)", config.Provider)
+			providerName = ask(reader, "Agent backend (codex/claude/opencode)", config.Provider)
 		}
 		if _, err := provider.ByName(providerName); err != nil {
 			return err
@@ -173,6 +173,6 @@ func init() {
 	setupCmd.Flags().StringVar(&setupSSHURL, "ssh-url", "", "origin URL to set after cloning (defaults to --repo)")
 	setupCmd.Flags().StringVar(&setupBranch, "branch", "", "base/integration branch agents target; created if missing (prompted if omitted)")
 	setupCmd.Flags().IntVar(&setupAgents, "agents", config.DevAgentCount, "number of dev-agent workspaces to create")
-	setupCmd.Flags().StringVar(&setupProvider, "provider", "", "agent backend to use and persist: codex or claude (default: configured provider)")
+	setupCmd.Flags().StringVar(&setupProvider, "provider", "", "agent backend to use and persist: codex, claude, or opencode (default: configured provider)")
 	setupCmd.Flags().BoolVar(&setupSkipInterview, "skip-interview", false, "skip the tech-stack interview (leaves a placeholder TECH.md)")
 }

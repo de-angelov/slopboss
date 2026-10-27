@@ -23,5 +23,5 @@ interrupted (SIGINT/SIGTERM), then cancels in-flight sessions and exits.`,
 }
 
 func init() {
-	runCmd.Flags().StringVar(&runProvider, "provider", "", "agent backend: codex or claude (default: configured provider)")
+	runCmd.Flags().StringVar(&runProvider, "provider", "", "agent backend: codex, claude, or opencode (default: configured provider)")
 }

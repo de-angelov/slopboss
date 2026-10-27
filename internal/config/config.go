@@ -31,7 +31,8 @@ const (
 	TeamLeadMaxTurns        = 20
 	FailedSessionRetryDelay = time.Minute
 	MaxFailedSessionRetries = 3
-	CodexUsageLimitCooldown = 6 * time.Hour
+	UsageLimitCooldown      = 6 * time.Hour
+	CodexUsageLimitCooldown = UsageLimitCooldown
 	ShutdownGracePeriod     = 15 * time.Second
 
 	// CancelGracePeriod is how long a running session may stay mismatched with

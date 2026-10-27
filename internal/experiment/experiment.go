@@ -581,12 +581,21 @@ func runVariantBackend(ctx context.Context, p provider.Provider, workspace strin
 	cmd.Stderr = io.MultiWriter(logOutput, monitor, &stderr)
 
 	runErr := cmd.Run()
-	usage := monitor.Breakdown()
+	usage := provider.FinalUsage(ctx, p, monitor)
 	finalMessage := monitor.FinalMessage()
 
 	if runErr != nil {
+		parts := []string{}
 		if stderr.Len() > 0 {
-			return usage, finalMessage, fmt.Errorf("%w: %s", runErr, oneLine(stderr.String()))
+			parts = append(parts, oneLine(stderr.String()))
+		}
+		if reporter, ok := monitor.(provider.ErrorReporter); ok {
+			if msg := reporter.ErrorMessage(); msg != "" {
+				parts = append(parts, oneLine(msg))
+			}
+		}
+		if len(parts) > 0 {
+			return usage, finalMessage, fmt.Errorf("%w: %s", runErr, strings.Join(parts, " | "))
 		}
 		return usage, finalMessage, runErr
 	}

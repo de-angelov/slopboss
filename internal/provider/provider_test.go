@@ -39,11 +39,14 @@ func TestCodexCommandIgnoresMaxTurns(t *testing.T) {
 
 func TestByName(t *testing.T) {
 	cases := map[string]string{
-		"":         "codex",
-		"codex":    "codex",
-		"Codex":    "codex",
-		"claude":   "claude",
-		" claude ": "claude",
+		"":           "codex",
+		"codex":      "codex",
+		"Codex":      "codex",
+		"claude":     "claude",
+		" claude ":   "claude",
+		"opencode":   "opencode",
+		"OpenCode":   "opencode",
+		" opencode ": "opencode",
 	}
 	for input, want := range cases {
 		p, err := ByName(input)
@@ -72,6 +75,12 @@ func TestProviderDefaultModels(t *testing.T) {
 	}
 	if got := (claudeProvider{}).DefaultModel(config.TeamLeadRole); got != "" {
 		t.Fatalf("claude team-lead model = %q, want configured default (empty)", got)
+	}
+	if got := (opencodeProvider{}).DefaultModel(config.DevAgent1Role); got != "" {
+		t.Fatalf("opencode dev model = %q, want empty (user configured default)", got)
+	}
+	if got := (opencodeProvider{}).DefaultModel(config.TeamLeadRole); got != "" {
+		t.Fatalf("opencode team-lead model = %q, want empty (user configured default)", got)
 	}
 }
 
@@ -108,6 +117,20 @@ func TestInteractiveCommandsAreNotHeadless(t *testing.T) {
 	}
 	if claude.Args[len(claude.Args)-1] != promptText {
 		t.Fatalf("claude interactive command must end with the seed prompt: %v", claude.Args)
+	}
+
+	opencode := (opencodeProvider{}).InteractiveCommand(t.Context(), "anthropic/claude-3-7-sonnet", promptText)
+	if hasArg(opencode.Args, "run") || hasArg(opencode.Args, "--format") {
+		t.Fatalf("opencode interactive command must not be headless: %v", opencode.Args)
+	}
+	if !hasArg(opencode.Args, "--auto") {
+		t.Fatalf("opencode interactive command missing --auto flag: %v", opencode.Args)
+	}
+	if !hasArg(opencode.Args, "--prompt") {
+		t.Fatalf("opencode interactive command missing --prompt flag: %v", opencode.Args)
+	}
+	if hasArg(opencode.Args, "--model") {
+		t.Fatalf("opencode interactive command must not pass --model: %v", opencode.Args)
 	}
 }
 
@@ -291,5 +314,96 @@ func TestClaudeOutputMonitorDetectsRejectedRateLimit(t *testing.T) {
 
 	if !writer.UsageLimited() {
 		t.Fatal("expected rejected rate-limit event to set usage-limited")
+	}
+}
+
+func TestOpenCodeCommandIgnoresMaxTurns(t *testing.T) {
+	cmd := (opencodeProvider{}).Command(context.Background(), "my-model", 20)
+	joined := strings.Join(cmd.Args, " ")
+	if !strings.Contains(joined, "run --format json --auto --model my-model") {
+		t.Fatalf("unexpected opencode command: %v", cmd.Args)
+	}
+}
+
+func TestOpenCodeExperimentCommand(t *testing.T) {
+	cmd := (opencodeProvider{}).ExperimentCommand(context.Background(), ExperimentSpec{
+		Model: "anthropic/claude-3-7-sonnet",
+	})
+	joined := strings.Join(cmd.Args, " ")
+	if !strings.Contains(joined, "run --format json --auto --model anthropic/claude-3-7-sonnet") {
+		t.Fatalf("unexpected opencode experiment command: %v", cmd.Args)
+	}
+}
+
+func TestOpenCodeOutputMonitorParsesStepFinishAndTokens(t *testing.T) {
+	writer := &opencodeOutputMonitor{}
+
+	lines := []string{
+		`{"type":"step_start","sessionID":"ses_123"}`,
+		`{"type":"step_finish","sessionID":"ses_123","part":{"tokens":{"input":100,"output":50,"reasoning":20,"cache":{"read":15,"write":5}}}}`,
+		`{"type":"step_finish","sessionID":"ses_123","part":{"tokens":{"input":200,"output":30,"reasoning":10,"cache":{"read":25,"write":5}}}}`,
+	}
+	for _, line := range lines {
+		if _, err := writer.Write([]byte(line + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := writer.SessionID(); got != "ses_123" {
+		t.Fatalf("sessionID = %q, want ses_123", got)
+	}
+
+	got := writer.Breakdown()
+	// step 1: cached = 20, input = 120, output = 70 (50+20), total = 190
+	// step 2: cached = 30, input = 230, output = 40 (30+10), total = 270
+	// total Input: 350, Cached: 50, Output: 110, Reasoning: 30, Total: 460
+	if got.Input != 350 {
+		t.Fatalf("input = %d, want 350", got.Input)
+	}
+	if got.CachedInput != 50 {
+		t.Fatalf("cached input = %d, want 50", got.CachedInput)
+	}
+	if got.Output != 110 {
+		t.Fatalf("output = %d, want 110", got.Output)
+	}
+	if got.ReasoningOutput != 30 {
+		t.Fatalf("reasoning = %d, want 30", got.ReasoningOutput)
+	}
+	if got.Total != 460 {
+		t.Fatalf("total = %d, want 460", got.Total)
+	}
+}
+
+func TestOpenCodeOutputMonitorCapturesFinalMessage(t *testing.T) {
+	writer := &opencodeOutputMonitor{}
+
+	lines := []string{
+		`{"type":"text","part":{"id":"p1","text":"Hello "}}`,
+		`{"type":"text","part":{"id":"p1","text":"Hello world!"}}`,
+	}
+	for _, line := range lines {
+		if _, err := writer.Write([]byte(line + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := writer.FinalMessage(); got != "Hello world!" {
+		t.Fatalf("final message = %q, want 'Hello world!'", got)
+	}
+}
+
+func TestOpenCodeOutputMonitorDetectsErrorsAndUsageLimit(t *testing.T) {
+	writer := &opencodeOutputMonitor{}
+
+	line := `{"type":"error","error":{"type":"provider.rate-limit","message":"Rate limit exceeded","status":429}}`
+	if _, err := writer.Write([]byte(line + "\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	if !writer.UsageLimited() {
+		t.Fatal("expected UsageLimited to be true")
+	}
+	if got := writer.ErrorMessage(); got != "Rate limit exceeded" {
+		t.Fatalf("errorMessage = %q, want 'Rate limit exceeded'", got)
 	}
 }
