@@ -42,7 +42,7 @@ type Options struct {
 	// merge into. It is persisted to CONFIG.md and created on the remote if
 	// missing. Defaults to "main".
 	BaseBranch string
-	// Provider is the default agent backend (codex/claude/opencode) persisted to CONFIG.md
+	// Provider is the default agent backend (codex/claude/opencode/agy) persisted to CONFIG.md
 	// so run/groom/experiment default to it without a flag.
 	Provider string
 	// Interview, when set, is the backend that runs the LLM-driven tech interview

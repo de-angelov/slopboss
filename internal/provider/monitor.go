@@ -508,3 +508,211 @@ func isOpenCodeUsageLimited(errorType string, status int) bool {
 	return strings.Contains(lower, "rate") && strings.Contains(lower, "limit") ||
 		strings.Contains(lower, "quota")
 }
+
+// ---------------------------------------------------------------------------
+// Antigravity (agy)
+// ---------------------------------------------------------------------------
+
+// agyOutputMonitor parses Antigravity CLI's `--output-format stream-json` output.
+type agyOutputMonitor struct {
+	mu           sync.Mutex
+	line         string
+	sessionID    string
+	usage        TokenBreakdown
+	usageLimited bool
+	errorMessage string
+	finalMessage string
+}
+
+func (w *agyOutputMonitor) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	for _, r := range string(p) {
+		if r == '\n' {
+			w.consumeLineLocked(w.line)
+			w.line = ""
+			continue
+		}
+		if r != '\r' {
+			w.line += string(r)
+		}
+	}
+	w.mu.Unlock()
+
+	return len(p), nil
+}
+
+func (w *agyOutputMonitor) consumeLineLocked(line string) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "{") {
+		return
+	}
+
+	var event struct {
+		Event          string `json:"event"`
+		ConversationID string `json:"conversation_id"`
+		StepUpdate     *struct {
+			ConversationID string `json:"conversation_id"`
+			StepIndex      int    `json:"step_index"`
+			State          string `json:"state"`
+			StepType       string `json:"step_type"`
+			TextDelta      string `json:"text_delta"`
+			Usage          struct {
+				InputTokens     int `json:"input_tokens"`
+				OutputTokens    int `json:"output_tokens"`
+				ThinkingTokens  int `json:"thinking_tokens"`
+				CacheReadTokens int `json:"cache_read_tokens"`
+				TotalTokens     int `json:"total_tokens"`
+			} `json:"usage"`
+		} `json:"step_update"`
+		Result *struct {
+			ConversationID string `json:"conversation_id"`
+			Status         string `json:"status"`
+			Response       string `json:"response"`
+			Error          string `json:"error"`
+			Usage          struct {
+				InputTokens     int `json:"input_tokens"`
+				OutputTokens    int `json:"output_tokens"`
+				ThinkingTokens  int `json:"thinking_tokens"`
+				CacheReadTokens int `json:"cache_read_tokens"`
+				TotalTokens     int `json:"total_tokens"`
+			} `json:"usage"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal([]byte(trimmed), &event); err != nil {
+		return
+	}
+
+	if event.ConversationID != "" {
+		w.sessionID = event.ConversationID
+	}
+
+	switch event.Event {
+	case "init":
+		// Handled above via event.ConversationID
+	case "step_update":
+		if su := event.StepUpdate; su != nil {
+			if su.ConversationID != "" {
+				w.sessionID = su.ConversationID
+			}
+			if su.Usage.TotalTokens > 0 || su.Usage.InputTokens > 0 {
+				u := su.Usage
+				cached := u.CacheReadTokens
+				input := u.InputTokens
+				if input < cached {
+					input += cached
+				}
+				output := u.OutputTokens
+				total := u.TotalTokens
+				if total == 0 {
+					total = input + output
+				}
+				w.usage = TokenBreakdown{
+					Input:           input,
+					CachedInput:     cached,
+					Output:          output,
+					ReasoningOutput: u.ThinkingTokens,
+					Total:           total,
+				}
+			}
+		}
+	case "result":
+		if res := event.Result; res != nil {
+			if res.ConversationID != "" {
+				w.sessionID = res.ConversationID
+			}
+			if res.Response != "" {
+				w.finalMessage = strings.TrimRight(res.Response, "\r\n")
+			}
+			if res.Error != "" {
+				w.errorMessage = res.Error
+			}
+			if isAgyUsageLimited(res.Status, res.Error) {
+				w.usageLimited = true
+			}
+			if res.Usage.TotalTokens > 0 || res.Usage.InputTokens > 0 {
+				u := res.Usage
+				cached := u.CacheReadTokens
+				input := u.InputTokens
+				if input < cached {
+					input += cached
+				}
+				output := u.OutputTokens
+				total := u.TotalTokens
+				if total == 0 {
+					total = input + output
+				}
+				w.usage = TokenBreakdown{
+					Input:           input,
+					CachedInput:     cached,
+					Output:          output,
+					ReasoningOutput: u.ThinkingTokens,
+					Total:           total,
+				}
+			}
+		}
+	}
+}
+
+func (w *agyOutputMonitor) Breakdown() TokenBreakdown {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if strings.TrimSpace(w.line) != "" {
+		w.consumeLineLocked(w.line)
+		w.line = ""
+	}
+	return w.usage
+}
+
+func (w *agyOutputMonitor) TokenTotal() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if strings.TrimSpace(w.line) != "" {
+		w.consumeLineLocked(w.line)
+		w.line = ""
+	}
+	return w.usage.Total
+}
+
+func (w *agyOutputMonitor) UsageLimited() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.usageLimited
+}
+
+func (w *agyOutputMonitor) FinalMessage() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if strings.TrimSpace(w.line) != "" {
+		w.consumeLineLocked(w.line)
+		w.line = ""
+	}
+	return w.finalMessage
+}
+
+func (w *agyOutputMonitor) SessionID() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.sessionID
+}
+
+func (w *agyOutputMonitor) ErrorMessage() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.errorMessage
+}
+
+func isAgyUsageLimited(status, errMsg string) bool {
+	if strings.EqualFold(status, "RATE_LIMITED") || strings.EqualFold(status, "RESOURCE_EXHAUSTED") {
+		return true
+	}
+	lower := strings.ToLower(errMsg)
+	return (strings.Contains(lower, "rate") && strings.Contains(lower, "limit")) ||
+		strings.Contains(lower, "quota") ||
+		strings.Contains(lower, "resource_exhausted") ||
+		strings.Contains(lower, "resource exhausted") ||
+		strings.Contains(lower, "429")
+}

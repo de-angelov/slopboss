@@ -76,8 +76,9 @@ go build -o slopboss ./cmd/slopboss
 
 > **Requirements:** Go **1.26+**, `git`, and at least one agent backend CLI on your
 > `PATH` — [Codex](https://github.com/openai/codex) (default),
-> [Claude Code](https://docs.claude.com/en/docs/claude-code) (`--provider claude`), or
-> [OpenCode](https://github.com/sst/opencode) (`--provider opencode`).
+> [Claude Code](https://docs.claude.com/en/docs/claude-code) (`--provider claude`),
+> [OpenCode](https://github.com/sst/opencode) (`--provider opencode`), or
+> [Antigravity](https://antigravity.google) (`--provider agy`).
 
 ---
 
@@ -170,7 +171,7 @@ dependent tasks never get stuck behind a session that was cancelled mid-completi
 
 | Flag | Commands | Default | Description |
 | --- | --- | --- | --- |
-| `--provider` | `run`, `groom`, `setup`, `eval run`, `eval groom` | persisted (`codex`) | Agent backend: `codex`, `claude`, or `opencode`. `setup` **persists** your choice to `CONFIG.md`, and the other commands default to it. |
+| `--provider` | `run`, `groom`, `setup`, `eval run`, `eval groom` | persisted (`codex`) | Agent backend: `codex`, `claude`, `opencode`, or `agy`. `setup` **persists** your choice to `CONFIG.md`, and the other commands default to it. |
 | `--dir` | **all commands** (global) | current directory | Board directory to operate in — run any command against a board from anywhere without `cd`. |
 | `--repo` | `setup` | — (prompted) | Product repository to clone into each workspace. |
 | `--ssh-url` | `setup` | `--repo` | Origin URL to set after cloning. |

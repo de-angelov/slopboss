@@ -39,14 +39,18 @@ func TestCodexCommandIgnoresMaxTurns(t *testing.T) {
 
 func TestByName(t *testing.T) {
 	cases := map[string]string{
-		"":           "codex",
-		"codex":      "codex",
-		"Codex":      "codex",
-		"claude":     "claude",
-		" claude ":   "claude",
-		"opencode":   "opencode",
-		"OpenCode":   "opencode",
-		" opencode ": "opencode",
+		"":            "codex",
+		"codex":       "codex",
+		"Codex":       "codex",
+		"claude":      "claude",
+		" claude ":    "claude",
+		"opencode":    "opencode",
+		"OpenCode":    "opencode",
+		" opencode ":  "opencode",
+		"agy":         "agy",
+		"Agy":         "agy",
+		" agy ":       "agy",
+		"antigravity": "agy",
 	}
 	for input, want := range cases {
 		p, err := ByName(input)
@@ -58,7 +62,7 @@ func TestByName(t *testing.T) {
 		}
 	}
 
-	if _, err := ByName("gemini"); err == nil {
+	if _, err := ByName("unknown-backend"); err == nil {
 		t.Fatal("expected error for unknown provider")
 	}
 }
@@ -81,6 +85,12 @@ func TestProviderDefaultModels(t *testing.T) {
 	}
 	if got := (opencodeProvider{}).DefaultModel(config.TeamLeadRole); got != "" {
 		t.Fatalf("opencode team-lead model = %q, want empty (user configured default)", got)
+	}
+	if got := (agyProvider{}).DefaultModel(config.DevAgent1Role); got != "" {
+		t.Fatalf("agy dev model = %q, want empty (user configured default)", got)
+	}
+	if got := (agyProvider{}).DefaultModel(config.TeamLeadRole); got != "" {
+		t.Fatalf("agy team-lead model = %q, want empty (user configured default)", got)
 	}
 }
 
@@ -131,6 +141,20 @@ func TestInteractiveCommandsAreNotHeadless(t *testing.T) {
 	}
 	if hasArg(opencode.Args, "--model") {
 		t.Fatalf("opencode interactive command must not pass --model: %v", opencode.Args)
+	}
+
+	agy := (agyProvider{}).InteractiveCommand(t.Context(), "Gemini 3.8 Flash (Medium)", promptText)
+	if hasArg(agy.Args, "-p") || hasArg(agy.Args, "--print") || hasArg(agy.Args, "stream-json") {
+		t.Fatalf("agy interactive command must not be headless: %v", agy.Args)
+	}
+	if !hasArg(agy.Args, "--dangerously-skip-permissions") {
+		t.Fatalf("agy interactive command missing skip-permissions flag: %v", agy.Args)
+	}
+	if !hasArg(agy.Args, "-i") {
+		t.Fatalf("agy interactive command missing -i flag: %v", agy.Args)
+	}
+	if agy.Args[len(agy.Args)-1] != promptText {
+		t.Fatalf("agy interactive command must end with seed prompt: %v", agy.Args)
 	}
 }
 
@@ -405,5 +429,82 @@ func TestOpenCodeOutputMonitorDetectsErrorsAndUsageLimit(t *testing.T) {
 	}
 	if got := writer.ErrorMessage(); got != "Rate limit exceeded" {
 		t.Fatalf("errorMessage = %q, want 'Rate limit exceeded'", got)
+	}
+}
+
+func TestAgyCommandIgnoresMaxTurns(t *testing.T) {
+	cmd := (agyProvider{}).Command(context.Background(), "Gemini 3.8 Flash (Medium)", 20)
+	joined := strings.Join(cmd.Args, " ")
+	if !strings.Contains(joined, "--output-format stream-json --dangerously-skip-permissions --model Gemini 3.8 Flash (Medium) --print -") {
+		t.Fatalf("unexpected agy command: %v", cmd.Args)
+	}
+}
+
+func TestAgyExperimentCommand(t *testing.T) {
+	cmd := (agyProvider{}).ExperimentCommand(context.Background(), ExperimentSpec{
+		Model: "Gemini 4 Argon (High)",
+	})
+	joined := strings.Join(cmd.Args, " ")
+	if !strings.Contains(joined, "--output-format stream-json --dangerously-skip-permissions --model Gemini 4 Argon (High) --print -") {
+		t.Fatalf("unexpected agy experiment command: %v", cmd.Args)
+	}
+}
+
+func TestAgyOutputMonitorParsesResultAndUsage(t *testing.T) {
+	writer := &agyOutputMonitor{}
+
+	lines := []string{
+		`{"event":"init","conversation_id":"conv-123"}`,
+		`{"event":"step_update","step_update":{"conversation_id":"conv-123","step_index":0,"state":"DONE","step_type":"user_input"}}`,
+		`{"event":"step_update","step_update":{"conversation_id":"conv-123","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"Done!\n","usage":{"input_tokens":500,"output_tokens":50,"thinking_tokens":20,"cache_read_tokens":100,"total_tokens":550}}}`,
+		`{"event":"result","result":{"conversation_id":"conv-123","status":"SUCCESS","response":"Done!\n","usage":{"input_tokens":500,"output_tokens":50,"thinking_tokens":20,"cache_read_tokens":100,"total_tokens":550}}}`,
+	}
+	for _, line := range lines {
+		if _, err := writer.Write([]byte(line + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := writer.SessionID(); got != "conv-123" {
+		t.Fatalf("sessionID = %q, want conv-123", got)
+	}
+	if got := writer.FinalMessage(); got != "Done!" {
+		t.Fatalf("final message = %q, want 'Done!'", got)
+	}
+
+	got := writer.Breakdown()
+	if got.Input != 500 {
+		t.Fatalf("input = %d, want 500", got.Input)
+	}
+	if got.CachedInput != 100 {
+		t.Fatalf("cached input = %d, want 100", got.CachedInput)
+	}
+	if got.Output != 50 {
+		t.Fatalf("output = %d, want 50", got.Output)
+	}
+	if got.ReasoningOutput != 20 {
+		t.Fatalf("reasoning output = %d, want 20", got.ReasoningOutput)
+	}
+	if got.Total != 550 {
+		t.Fatalf("total = %d, want 550", got.Total)
+	}
+	if writer.UsageLimited() {
+		t.Fatal("expected UsageLimited to be false on success")
+	}
+}
+
+func TestAgyOutputMonitorDetectsErrorsAndUsageLimit(t *testing.T) {
+	writer := &agyOutputMonitor{}
+
+	line := `{"event":"result","result":{"conversation_id":"conv-456","status":"ERROR","error":"Resource exhausted: quota exceeded (429)"}}`
+	if _, err := writer.Write([]byte(line + "\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	if !writer.UsageLimited() {
+		t.Fatal("expected UsageLimited to be true for quota exceeded")
+	}
+	if got := writer.ErrorMessage(); !strings.Contains(got, "quota exceeded") {
+		t.Fatalf("errorMessage = %q, expected quota exceeded", got)
 	}
 }

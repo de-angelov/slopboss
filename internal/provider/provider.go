@@ -143,8 +143,10 @@ func ByName(name string) (Provider, error) {
 		return claudeProvider{}, nil
 	case "opencode":
 		return opencodeProvider{}, nil
+	case "agy", "antigravity":
+		return agyProvider{}, nil
 	default:
-		return nil, fmt.Errorf("unknown provider %q (want %q, %q, or %q)", name, "codex", "claude", "opencode")
+		return nil, fmt.Errorf("unknown provider %q (want %q, %q, %q, or %q)", name, "codex", "claude", "opencode", "agy")
 	}
 }
 
@@ -362,4 +364,48 @@ func (opencodeProvider) FetchUsage(ctx context.Context, sessionID string) (Token
 		ReasoningOutput: t.Reasoning,
 		Total:           input + output,
 	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Antigravity (agy)
+// ---------------------------------------------------------------------------
+
+type agyProvider struct{}
+
+func (agyProvider) Name() string { return "agy" }
+
+func (agyProvider) DefaultModel(role string) string {
+	// Defer to the user's configured Antigravity model in settings.json.
+	_ = role
+	return ""
+}
+
+func (agyProvider) NewMonitor() Monitor { return &agyOutputMonitor{} }
+
+func (agyProvider) Command(ctx context.Context, model string, maxTurns int) *exec.Cmd {
+	_ = maxTurns
+	args := []string{"--output-format", "stream-json", "--dangerously-skip-permissions"}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	args = append(args, "--print", "-")
+	return newBackendCmd(ctx, "agy", args...)
+}
+
+func (agyProvider) InteractiveCommand(ctx context.Context, model string, prompt string) *exec.Cmd {
+	args := []string{"--dangerously-skip-permissions"}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	args = append(args, "-i", prompt)
+	return exec.CommandContext(ctx, "agy", args...)
+}
+
+func (agyProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec) *exec.Cmd {
+	args := []string{"--output-format", "stream-json", "--dangerously-skip-permissions"}
+	if spec.Model != "" {
+		args = append(args, "--model", spec.Model)
+	}
+	args = append(args, "--print", "-")
+	return newBackendCmd(ctx, "agy", args...)
 }
