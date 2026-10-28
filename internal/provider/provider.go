@@ -388,7 +388,6 @@ func (agyProvider) Command(ctx context.Context, model string, maxTurns int) *exe
 	if model != "" {
 		args = append(args, "--model", model)
 	}
-	args = append(args, "--print", "-")
 	return newBackendCmd(ctx, "agy", args...)
 }
 
@@ -406,6 +405,5 @@ func (agyProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec) *
 	if spec.Model != "" {
 		args = append(args, "--model", spec.Model)
 	}
-	args = append(args, "--print", "-")
 	return newBackendCmd(ctx, "agy", args...)
 }

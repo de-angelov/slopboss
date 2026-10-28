@@ -435,7 +435,7 @@ func TestOpenCodeOutputMonitorDetectsErrorsAndUsageLimit(t *testing.T) {
 func TestAgyCommandIgnoresMaxTurns(t *testing.T) {
 	cmd := (agyProvider{}).Command(context.Background(), "Gemini 3.8 Flash (Medium)", 20)
 	joined := strings.Join(cmd.Args, " ")
-	if !strings.Contains(joined, "--output-format stream-json --dangerously-skip-permissions --model Gemini 3.8 Flash (Medium) --print -") {
+	if !strings.Contains(joined, "--output-format stream-json --dangerously-skip-permissions --model Gemini 3.8 Flash (Medium)") {
 		t.Fatalf("unexpected agy command: %v", cmd.Args)
 	}
 }
@@ -445,7 +445,7 @@ func TestAgyExperimentCommand(t *testing.T) {
 		Model: "Gemini 4 Argon (High)",
 	})
 	joined := strings.Join(cmd.Args, " ")
-	if !strings.Contains(joined, "--output-format stream-json --dangerously-skip-permissions --model Gemini 4 Argon (High) --print -") {
+	if !strings.Contains(joined, "--output-format stream-json --dangerously-skip-permissions --model Gemini 4 Argon (High)") {
 		t.Fatalf("unexpected agy experiment command: %v", cmd.Args)
 	}
 }
