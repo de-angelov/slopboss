@@ -336,6 +336,7 @@ Every task must include: Task ID, Category (AFK/HITL), Owner, Branch, Status,
 Dependencies, Blocking tasks, and body sections for Objective (one sentence),
 Scope, Out of Scope, Acceptance Criteria, and Verification (the exact command or
 steps). Implementation agents should never need to infer missing scope.
+In Scope, provide the concrete target file paths and, when using external libraries or complex APIs, provide the exact 3-5 line code snippet/recipe to eliminate exploratory turn waste. In Verification, specify the targeted test command (e.g. npx vitest run tests/my-task.test.ts or go test -run TestName ./...) for fast iteration, alongside the full test command.
 
 Use Status: Backlog for unassigned tasks in BACKLOG.md. Do not write
 Status: Ready.

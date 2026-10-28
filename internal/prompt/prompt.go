@@ -19,6 +19,7 @@ import (
 // any drift between copies would silently bust the cache. It has no leading or
 // trailing newline; callers supply the surrounding whitespace.
 const TestingDisciplineRules = `- Testing discipline: prefer existing test style and user-visible/rendered assertions over inspecting React component internals.
+- Targeted test execution: during active iteration, run ONLY the specific test file covering the assigned task (for example ` + "`npx vitest run path/to/file.test.ts --reporter=basic --no-color`, `go test -run TestName ./...`, `pytest path/to/test_file.py`" + `). Do not run full test suites repeatedly during development as voluminous failure logs flood the transcript and burn tokens. Run the full test suite only once at the end before completing the task.
 - Do not add custom test traversal helpers, mock frameworks, DOM harnesses, or new test utilities unless the ticket explicitly requires interaction behavior that cannot be covered otherwise.
 - Test contract, not implementation: assert rendered text, form fields, button labels, form ids/actions, validation messages, and preserved existing behavior.
 - Avoid asserting component prop wiring directly when the same behavior can be observed in rendered output.
@@ -41,6 +42,7 @@ Runtime Rules:
 - Work only on the assigned task and keep changes focused.
 - The current working directory is already the assigned product repository. Do not cd into "workspaces/repo-agent-*" unless that directory exists from the current working directory.
 - Use the existing repository test stack. If a missing tool or unrelated type error blocks verification, report it instead of expanding scope.
+- File reading discipline: avoid reading entire large files (>300 lines) with unbounded reads. Locate target functions first (e.g. with grep -n) and read targeted line ranges.
 - If verification reveals unrelated failures, stop and mark the task Blocked in TASKS.md. Do not fix unrelated files.
 - For unrelated verification failures, add or update a [BLOCKED] section with the failing command, exact output, out-of-scope file path, and a suggested narrow unblocker task. Set Status: Blocked and Blocked by: Team Lead triage required unless a blocker task already exists.
 ` + DependencyInstallRules + "\n" + TestingDisciplineRules + "\n"

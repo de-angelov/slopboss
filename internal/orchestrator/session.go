@@ -147,9 +147,8 @@ Efficiency Rules (keep this session small — you are hard-capped at %d turns):
 func runSession(ctx context.Context, role string, workspace string, promptText string, p provider.Provider) SessionOutcome {
 	model := p.DefaultModel(role)
 
-	// Cap the team lead's agentic turns; dev agents run uncapped because they do
-	// real implementation that legitimately needs many turns.
-	maxTurns := 0
+	// Cap agentic turns to prevent runaway loops from burning tokens.
+	maxTurns := config.DevAgentMaxTurns
 	if role == teamLeadRole {
 		maxTurns = config.TeamLeadMaxTurns
 	}

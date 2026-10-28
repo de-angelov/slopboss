@@ -26,9 +26,13 @@ const (
 	// whole (large) transcript, token totals balloon superlinearly with turn
 	// count. The cap is a backstop only — the prompt constraints do the primary
 	// steering. A session that hits the cap simply resumes from the updated board
-	// on the next poll, so capping never loses work. 0 (dev agents) means
-	// unlimited.
-	TeamLeadMaxTurns        = 20
+	// on the next poll, so capping never loses work.
+	TeamLeadMaxTurns = 20
+
+	// DevAgentMaxTurns hard-caps the agentic turns of a dev-agent task
+	// session. Focused micro-tasks finish within 5-10 turns. Capping at 15
+	// prevents runaway loops from draining tokens when tests or environments fail.
+	DevAgentMaxTurns = 15
 	FailedSessionRetryDelay = time.Minute
 	MaxFailedSessionRetries = 3
 	UsageLimitCooldown      = 6 * time.Hour
