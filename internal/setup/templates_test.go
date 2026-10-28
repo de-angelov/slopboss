@@ -112,6 +112,20 @@ func TestTeamLeadTemplateDocumentsReadyIsNotAStatus(t *testing.T) {
 	}
 }
 
+func TestTeamLeadTemplateDocumentsTokenOptimization(t *testing.T) {
+	got := teamLeadTemplate
+	for _, want := range []string{
+		"Tech Stack & Token Optimization (Universal Mechanism)",
+		"Lean & Quiet Test Output",
+		"Targeted Test Execution During Dev",
+		"Continuously audit the tech stack, tooling configuration, and verification commands for token and resource efficiency.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("TEAM_LEAD_AGENT.md template missing token optimization requirement %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestDevAgentTemplateUsesBaseBranch(t *testing.T) {
 	got := devAgentTemplate("develop")
 	if !strings.Contains(got, "squash-merged into product develop") {

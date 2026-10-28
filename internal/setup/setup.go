@@ -221,7 +221,7 @@ func interviewTurnPrompt(transcript string) string {
 	if convo == "" {
 		convo = "(none yet — ask your first question)"
 	}
-	return fmt.Sprintf(`You are interviewing a developer to produce an excellent TECH.md for a NEW (empty) project. Ask ONE focused question at a time and ADAPT to prior answers (e.g. ask stack-specific follow-ups). Aim to understand: what they are building, the stack (language, framework, package manager, backend, database), how work is verified and what "done" means, and key conventions to enforce or avoid. Be smart: skip anything already answered, and do NOT ask about individual shell commands you can infer from the stack.
+	return fmt.Sprintf(`You are interviewing a developer to produce an excellent TECH.md for a NEW (empty) project. Ask ONE focused question at a time and ADAPT to prior answers (e.g. ask stack-specific follow-ups). Aim to understand: what they are building, the stack (language, framework, package manager, backend, database), how work is verified and what "done" means, token-efficient verification tooling (lean/non-interactive test reporter flags and targeted test execution commands to minimize AI token burn), and key conventions to enforce or avoid. Be smart: skip anything already answered, and do NOT ask about individual shell commands you can infer from the stack.
 
 Reply with EITHER:
 - the next question ONLY (a single short line — no numbering, no preamble, no quotes), OR
@@ -273,7 +273,7 @@ func techSynthesisPrompt(transcript string) string {
 
 Treat the transcript as complete, even if it ends with an unanswered recommendation or an uncertain answer. Do not ask follow-up questions, do not write "Question:" prompts, and do not recommend that a human choose the stack later. If the interview leaves a gap, choose concrete defaults that fit the answers and state them as decisions in TECH.md.
 
-Make it genuinely useful and in-depth — a dev agent should be able to implement and verify a task from it alone. Infer everything mechanical from the stack: the exact install/test/build/typecheck/lint (and any migration/codegen) commands, the conventional directory layout, and the coding/testing standards typical for that stack. Fill every section concretely; do not leave angle-bracket placeholders. You may use fenced code blocks for commands and add sub-bullets where it helps. Do NOT include git/branching/board-workflow rules — those live in AGENTS.md and DEV_AGENT.md.
+Make it genuinely useful and in-depth — a dev agent should be able to implement and verify a task from it alone. Infer everything mechanical from the stack: the exact install/test/build/typecheck/lint (and any migration/codegen) commands, the conventional directory layout, and the coding/testing standards typical for that stack. Fill every section concretely; do not leave angle-bracket placeholders. Crucially for AI agent execution, audit the tech stack and configure token-efficient verification commands: specify non-interactive, quiet/lean test reporter flags (e.g. vitest run --reporter=basic, jest --reporters=default --no-colors, pytest -q, go test) that suppress animated terminal spinners and progress rewrites, preventing token waste. Always provide both the targeted single-test command syntax for fast dev-loop iteration and the full-suite command. You may use fenced code blocks for commands and add sub-bullets where it helps. Do NOT include git/branching/board-workflow rules — those live in AGENTS.md and DEV_AGENT.md.
 
 Interview:
 %s
@@ -304,7 +304,8 @@ A few sentences on layers, data flow, and module boundaries.
 ## Commands
 
 - Install:
-- Test:
+- Test (full suite, lean/quiet reporter):
+- Test (targeted single test):
 - Build / typecheck:
 - Lint / format:
 - Other (migrations, codegen, seeds):
@@ -314,6 +315,12 @@ A few sentences on layers, data flow, and module boundaries.
 - Test stack:
 - What must be covered (and the coverage/verification bar):
 - Where tests live:
+
+## Tooling & Token Efficiency Standards
+
+- Lean test reporter flags (suppress animated spinners, progress rewrites):
+- Targeted test syntax for fast local iteration:
+- Output volume limits and context hygiene:
 
 ## Conventions
 

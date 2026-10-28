@@ -58,9 +58,15 @@ normally written by the setup tech quiz — edit it freely.
 ## Commands
 
 - Install:
-- Test:
+- Test (full suite, lean reporter):
+- Test (targeted single test):
 - Build / typecheck:
 - Lint / format:
+
+## Tooling & Token Efficiency
+
+- Lean test reporter flags:
+- Targeted test syntax:
 
 ## Conventions
 
@@ -187,7 +193,8 @@ Applies to every Dev Agent role.
 - Implement assigned tasks.
 - Update dev-agent progress in TASKS.md.
 - Write or update focused tests.
-- Run verification defined in TECH.md.
+- Run targeted test files during iteration rather than full test suites.
+- Run verification defined in TECH.md (using lean/quiet reporters to prevent token waste).
 - Commit focused changes.
 - Push the assigned branch.
 - Squash-merge completed work into product %[1]s.
@@ -267,6 +274,7 @@ number of tasks.
 ## Responsibilities
 
 - Run requirement discovery with the user.
+- Continuously audit the tech stack, tooling configuration, and verification commands for token and resource efficiency.
 - Groom and prioritize BACKLOG.md.
 - Assign ready work into TASKS.md.
 - Coordinate dependencies and maximize safe parallel work.
@@ -311,6 +319,20 @@ dealing with full-stack features, split horizontally across the stack (storage,
 domain types, data access, API, client hooks, UI, integration) into independent
 atomic micro-steps rather than bundling them.
 
+## Tech Stack & Token Optimization (Universal Mechanism)
+
+During setup, grooming, and task planning, the Team Lead must actively audit and optimize the target project's tooling, scripts, and verification commands for AI token efficiency:
+
+1. **Lean & Quiet Test Output**:
+   - For every tech stack (Vitest, Jest, Pytest, Go, Cargo, Maven, etc.), ensure verification commands specify non-interactive, quiet reporters (e.g. vitest run --reporter=basic, pytest -q, jest --no-colors --reporters=default) that suppress animated terminal spinners and progress rewrites.
+   - Prevent command outputs that dump thousands of lines of progress tokens into agent contexts.
+2. **Targeted Test Execution During Dev**:
+   - In every task's Verification section, provide the exact command to run only the targeted test file for that task during local development, reserving full-suite runs for final verification.
+3. **Ecosystem & Library Reuse**:
+   - Always instruct agents to leverage standard ecosystem libraries over custom infrastructure. Smaller codebases mean smaller diffs, fewer lines to inspect, and less context consumption.
+4. **Context & Board Hygiene**:
+   - Keep board markdown files bounded (<250 lines) and clean. Ensure completed tasks are moved to ARCHIVE.md promptly.
+
 ## Execution Category
 
 Classify every task as:
@@ -336,7 +358,7 @@ Every task must include: Task ID, Category (AFK/HITL), Owner, Branch, Status,
 Dependencies, Blocking tasks, and body sections for Objective (one sentence),
 Scope, Out of Scope, Acceptance Criteria, and Verification (the exact command or
 steps). Implementation agents should never need to infer missing scope.
-In Scope, provide the concrete target file paths and, when using external libraries or complex APIs, provide the exact 3-5 line code snippet/recipe to eliminate exploratory turn waste. In Verification, specify the targeted test command (e.g. npx vitest run tests/my-task.test.ts or go test -run TestName ./...) for fast iteration, alongside the full test command.
+In Scope, provide the concrete target file paths and, when using external libraries or complex APIs, provide the exact 3-5 line code snippet/recipe to eliminate exploratory turn waste. In Verification, specify the targeted test command with lean/non-interactive reporter flags (e.g. npx vitest run tests/my-task.test.ts --reporter=basic, pytest -q path/to/test.py, or go test -run TestName ./...) for fast iteration, alongside the full test command.
 
 Use Status: Backlog for unassigned tasks in BACKLOG.md. Do not write
 Status: Ready.
