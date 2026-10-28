@@ -142,3 +142,91 @@ func TestFirstBacklogTaskIdleWhenAllBlocked(t *testing.T) {
 		t.Fatalf("FirstBacklogTask = %q, want empty (nothing assignable -> team lead idle)", got.Title)
 	}
 }
+
+func TestReadTasksToleratesFormattingVariations(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TASKS.md")
+	content := `# TASKS
+
+## Dev Agent 1 In Progress
+
+### Build user authentication
+- **Owner:** Dev Agent 1
+* **Branch:** agent/1/auth-feature
+- Status: in-progress
+• **Category:** **AFK**
+**Task ID:** AUTH-01
+- Dependencies: none
+* Blocking tasks: none
+
+This is the task description with some notes.
+
+## 📦 Archive
+
+### Old completed task
+Owner: Dev Agent 1
+Status: Done
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks, err := ReadTasks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Archive section should be skipped
+	if len(tasks) != 1 {
+		t.Fatalf("parsed %d tasks, want 1", len(tasks))
+	}
+
+	task := tasks[0]
+	if task.Title != "Build user authentication" {
+		t.Errorf("Title = %q, want 'Build user authentication'", task.Title)
+	}
+	if task.Owner != "Dev Agent 1" {
+		t.Errorf("Owner = %q, want 'Dev Agent 1'", task.Owner)
+	}
+	if task.Branch != "agent/1/auth-feature" {
+		t.Errorf("Branch = %q, want 'agent/1/auth-feature'", task.Branch)
+	}
+	if task.Status != "In Progress" {
+		t.Errorf("Status = %q, want 'In Progress'", task.Status)
+	}
+	if task.Category != "AFK" {
+		t.Errorf("Category = %q, want 'AFK'", task.Category)
+	}
+	if task.ID != "AUTH-01" {
+		t.Errorf("ID = %q, want 'AUTH-01'", task.ID)
+	}
+	if task.Dependencies != "none" {
+		t.Errorf("Dependencies = %q, want 'none'", task.Dependencies)
+	}
+	if task.BlockingTasks != "none" {
+		t.Errorf("BlockingTasks = %q, want 'none'", task.BlockingTasks)
+	}
+}
+
+func TestIsCompletedSection(t *testing.T) {
+	tests := []struct {
+		section string
+		want    bool
+	}{
+		{"Done", true},
+		{"Archive", true},
+		{"Completed", true},
+		{"📦 Archive", true},
+		{"Done!", true},
+		{"Completed Tasks", false},
+		{"Definition of Done", false},
+		{"Backlog", false},
+		{"Dev Agent 1 In Progress", false},
+	}
+
+	for _, tt := range tests {
+		if got := isCompletedSection(tt.section); got != tt.want {
+			t.Errorf("isCompletedSection(%q) = %v, want %v", tt.section, got, tt.want)
+		}
+	}
+}

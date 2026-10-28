@@ -35,7 +35,7 @@ func ActiveTasksForRole(tasks []Task, role string) []Task {
 	var active []Task
 	for _, task := range tasks {
 		if r, ok := config.DevAgentRoleForActiveSection(task.Section); ok && r == role &&
-			task.Owner == role && task.Status == "In Progress" {
+			task.Owner == role && strings.EqualFold(task.Status, "In Progress") {
 			active = append(active, task)
 		}
 	}
@@ -82,7 +82,7 @@ func FirstBacklogTask(tasks []Task) Task {
 	var firstReady Task
 	found := false
 	for _, task := range tasks {
-		if task.Section != "Backlog" || !(task.Status == "Backlog" || task.Status == "") {
+		if task.Section != "Backlog" || !(strings.EqualFold(task.Status, "Backlog") || task.Status == "") {
 			continue
 		}
 		if !DependenciesSatisfied(task, done) {
@@ -119,7 +119,7 @@ func AllDevAgentsBusy(desired map[string]Task) bool {
 func BlockedBacklogIDs(tasks []Task, done map[string]bool) []string {
 	var ids []string
 	for _, task := range tasks {
-		pending := task.Section == "Backlog" && (task.Status == "Backlog" || task.Status == "")
+		pending := task.Section == "Backlog" && (strings.EqualFold(task.Status, "Backlog") || task.Status == "")
 		blocked := strings.EqualFold(task.Status, "Blocked")
 		if (pending && !DependenciesSatisfied(task, done)) || blocked {
 			id := task.ID

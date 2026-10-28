@@ -53,6 +53,70 @@ func taskFingerprint(task Task) string {
 	}, "\x00")
 }
 
+// isCompletedSection checks whether a section heading indicates completed/archived work.
+// It strips emojis and symbols to safely handle headings like "## 📦 Archive" or "## Done"
+// without falsely matching phrases like "Definition of Done".
+func isCompletedSection(section string) bool {
+	var sb strings.Builder
+	for _, r := range section {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+			sb.WriteRune(r)
+		}
+	}
+	clean := strings.ToLower(sb.String())
+	return clean == "done" || clean == "archive" || clean == "completed"
+}
+
+// parseMetadataLine safely extracts key-value metadata from a task line.
+// It tolerates markdown list bullets (- , * , • ) and bold/italic markup (** __)
+// around the key and value (e.g. "- **Owner:** Agent 1" or "* Status: In Progress").
+func parseMetadataLine(line string) (key, val string, ok bool) {
+	trimmed := strings.TrimSpace(line)
+	trimmed = strings.TrimLeft(trimmed, "-*• \t")
+	trimmed = strings.TrimPrefix(trimmed, "**")
+	trimmed = strings.TrimPrefix(trimmed, "__")
+
+	idx := strings.Index(trimmed, ":")
+	if idx == -1 {
+		return "", "", false
+	}
+
+	rawKey := strings.TrimSpace(trimmed[:idx])
+	rawKey = strings.TrimRight(rawKey, "*_ \t")
+
+	val = strings.TrimSpace(trimmed[idx+1:])
+	// If the colon was inside bold/italic tags (e.g. **Category:** value),
+	// the closing tag appears at the start of val.
+	val = strings.TrimPrefix(val, "**")
+	val = strings.TrimPrefix(val, "__")
+	val = strings.Trim(val, "*_ \t")
+
+	return strings.ToLower(rawKey), val, true
+}
+
+// normalizeStatus canonicalizes task status strings to standard values ("In Progress",
+// "Backlog", "Blocked", "Done"). It normalizes casing, hyphens, and whitespace.
+func normalizeStatus(raw string) string {
+	clean := strings.TrimSpace(raw)
+	lower := strings.ToLower(clean)
+	lower = strings.ReplaceAll(lower, "-", " ")
+	lower = strings.ReplaceAll(lower, "_", " ")
+	lower = strings.Join(strings.Fields(lower), " ")
+
+	switch lower {
+	case "in progress":
+		return "In Progress"
+	case "backlog":
+		return "Backlog"
+	case "blocked":
+		return "Blocked"
+	case "done":
+		return "Done"
+	default:
+		return clean
+	}
+}
+
 // ReadTasks parses a single board file into Tasks. It stops parsing at a
 // completed/archive section to save tokens, since those bodies are never needed.
 func ReadTasks(path string) ([]Task, error) {
@@ -89,7 +153,7 @@ func ReadTasks(path string) ([]Task, error) {
 			currentSection = strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
 
 			// TOKEN OPTIMIZATION: Stop parsing if we hit historical/completed logs
-			if currentSection == "Done" || currentSection == "Archive" || currentSection == "Completed" {
+			if isCompletedSection(currentSection) {
 				currentSection = "SKIP"
 			}
 			continue
@@ -116,21 +180,23 @@ func ReadTasks(path string) ([]Task, error) {
 			continue
 		}
 
-		switch {
-		case strings.HasPrefix(trimmed, "Owner:"):
-			current.Owner = strings.TrimSpace(strings.TrimPrefix(trimmed, "Owner:"))
-		case strings.HasPrefix(trimmed, "Branch:"):
-			current.Branch = strings.TrimSpace(strings.TrimPrefix(trimmed, "Branch:"))
-		case strings.HasPrefix(trimmed, "Status:"):
-			current.Status = strings.TrimSpace(strings.TrimPrefix(trimmed, "Status:"))
-		case strings.HasPrefix(trimmed, "Category:"):
-			current.Category = strings.TrimSpace(strings.TrimPrefix(trimmed, "Category:"))
-		case strings.HasPrefix(trimmed, "Task ID:"):
-			current.ID = strings.TrimSpace(strings.TrimPrefix(trimmed, "Task ID:"))
-		case strings.HasPrefix(trimmed, "Dependencies:"):
-			current.Dependencies = strings.TrimSpace(strings.TrimPrefix(trimmed, "Dependencies:"))
-		case strings.HasPrefix(trimmed, "Blocking tasks:"):
-			current.BlockingTasks = strings.TrimSpace(strings.TrimPrefix(trimmed, "Blocking tasks:"))
+		if k, v, ok := parseMetadataLine(trimmed); ok {
+			switch k {
+			case "owner":
+				current.Owner = v
+			case "branch":
+				current.Branch = v
+			case "status":
+				current.Status = normalizeStatus(v)
+			case "category":
+				current.Category = v
+			case "task id":
+				current.ID = v
+			case "dependencies":
+				current.Dependencies = v
+			case "blocking tasks":
+				current.BlockingTasks = v
+			}
 		}
 
 		body = append(body, line)

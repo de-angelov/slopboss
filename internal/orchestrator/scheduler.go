@@ -60,7 +60,7 @@ func reconcile(tasks []board.Task) {
 
 	for _, task := range tasks {
 		if role, ok := config.DevAgentRoleForActiveSection(task.Section); ok {
-			if task.Owner == role && task.Status == "In Progress" {
+			if task.Owner == role && strings.EqualFold(task.Status, "In Progress") {
 				addDesired(role, task, task.Key)
 			}
 			continue
@@ -204,7 +204,7 @@ func teamLeadScheduleKey(task board.Task, tasks []board.Task, done map[string]bo
 	for _, task := range tasks {
 		if role, ok := config.DevAgentRoleForActiveSection(task.Section); ok &&
 			task.Owner == role &&
-			task.Status == "In Progress" {
+			strings.EqualFold(task.Status, "In Progress") {
 			activeLaneKeys = append(activeLaneKeys, role+"="+task.Key)
 		}
 	}
