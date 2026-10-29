@@ -404,6 +404,8 @@ func createClone(opts Options, dir string) error {
 	if err := ensureBaseBranch(path, opts.BaseBranch); err != nil {
 		return err
 	}
+	_ = run(path, "git", "config", "merge.conflictStyle", "zdiff3")
+	_ = run(path, "git", "config", "rerere.enabled", "true")
 	return removeWorkspaceTaskBoard(path)
 }
 

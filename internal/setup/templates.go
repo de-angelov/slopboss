@@ -225,7 +225,12 @@ Before marking work complete:
 2. Commit focused changes.
 3. Push the task branch.
 4. Squash-merge the completed branch into product %[1]s.
-5. Push product %[1]s.
+5. Push product %[1]s. If push is rejected because origin moved ahead, do not abort or block:
+   a. Run: git fetch origin %[1]s && git rebase origin/%[1]s
+   b. On conflict: list files with 'git diff --name-only --diff-filter=U' and resolve using the zdiff3 base context.
+   c. Verify zero leftover markers: git diff --check (must exit 0).
+   d. Complete rebase: git add <resolved-files> && git rebase --continue
+   e. Re-run verification tests, squash-merge, and push product %[1]s.
 6. Fetch product %[1]s and verify the recorded squash commit is reachable from
    origin/%[1]s with: git merge-base --is-ancestor <squash-commit> origin/%[1]s.
 7. Record verification and merge notes in the task, including the squash commit.

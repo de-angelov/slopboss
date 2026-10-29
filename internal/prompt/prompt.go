@@ -35,6 +35,10 @@ const DependencyInstallRules = `- Dependency install discipline: run package-man
 - When package manifests change, commit the corresponding lockfile (` + "`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`, etc.)" + ` or explicitly block on the install failure that prevented generating it.
 - Do not leave package-manager install processes running in the workspace after marking a task blocked or stopping work.`
 
+// RebaseAuditRules directs dev agents to self-heal non-fast-forward push rejections
+// by rebasing, resolving zdiff3 conflicts, and verifying with git diff --check.
+const RebaseAuditRules = `- Rebase audit discipline: if push to main is rejected (non-fast-forward), do not abort or block. Run ` + "`git fetch origin <base> && git rebase origin/<base>`" + `. On conflict: list files with ` + "`git diff --name-only --diff-filter=U`" + `, resolve using the zdiff3 base context, verify zero leftover markers with ` + "`git diff --check`" + `, continue rebase, re-run tests, and push.`
+
 func DevAgentRuntimeInstructions() string {
 	return `
 Role: Dev Agent
@@ -45,7 +49,7 @@ Runtime Rules:
 - File reading discipline: avoid reading entire large files (>300 lines) with unbounded reads. Locate target functions first (e.g. with grep -n) and read targeted line ranges.
 - If verification reveals unrelated failures, stop and mark the task Blocked in TASKS.md. Do not fix unrelated files.
 - For unrelated verification failures, add or update a [BLOCKED] section with the failing command, exact output, out-of-scope file path, and a suggested narrow unblocker task. Set Status: Blocked and Blocked by: Team Lead triage required unless a blocker task already exists.
-` + DependencyInstallRules + "\n" + TestingDisciplineRules + "\n"
+` + DependencyInstallRules + "\n" + TestingDisciplineRules + "\n" + RebaseAuditRules + "\n"
 }
 
 // BuildPrompt assembles a full session prompt for role/task. The static prefix is
