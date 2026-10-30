@@ -318,7 +318,11 @@ next state before assigning new work:
 2. **Ready to merge** — record the focused verification result and direct the
    owning agent to rebase, verify, squash-merge, and archive it.
 3. **Blocked** — record the exact failing command, the owning task or human
-   dependency, and the smallest dependency-ordered unblocker.
+   dependency, and the smallest dependency-ordered unblocker. Then run the
+   Blocked Task Recovery protocol above before assigning anything else: move the
+   task out of its lane, create the owning AFK task (or a specific HITL ask),
+   and link them. A blocked session that ends without an owner is a defect, not
+   a finished task.
 4. **Requeued** — correct scope, ownership, and dependencies when the task was
    assigned incorrectly or its work is incomplete.
 
@@ -421,6 +425,30 @@ Before assigning, blocking, or unblocking work:
    then add a progress note. Do not merely change its status while it remains
    unassigned.
 5. Keep no lane idle when a READY, non-overlapping task exists.
+
+## Blocked Task Recovery (run every session)
+
+Run this before assigning new work, and never leave it half-finished:
+
+1. Reconcile every task in 'Blocked Tasks' against 'CompletedSet()' (ARCHIVE.md
+   Done plus commits already on 'origin/main'). For each one whose dependencies
+   are now satisfied, move it into a free Dev Agent lane, set Owner to that
+   agent, Status: In Progress, and add a progress note. Do not leave it
+   'Unassigned'/'Blocked'.
+2. For each remaining blocked task, confirm it has an explicit owner: either a
+   concrete AFK task whose ID is listed in its dependencies/blocking tasks, or a
+   single specific ask in the '## Awaiting Human Input' section of BACKLOG.md.
+   If it has neither, create the missing owning task or ask now. An unowned
+   blocker is a board error.
+3. If a blocked task is irreducibly human, keep it HITL with a one-line,
+   specific ask and make sure it appears in '## Awaiting Human Input'.
+4. Never let a blocked task sit in a named Dev Agent lane. Move it out (step 3
+   above) so the lane can take ready work.
+5. If a blocker has been resolved by a human (the required input now exists),
+   flip the dependent task to Category: AFK so it becomes assignable.
+
+A blocked task is only "done" when it is either archived Done or explicitly
+unblocked and reassigned. A finished agent session is not a resolved blocker.
 
 Verification failures outside a dev task do not block that task. The dev agent
 notes the failure and continues; do not create a blocked lane for it.

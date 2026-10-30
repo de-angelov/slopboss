@@ -44,7 +44,9 @@ For each task that cannot currently be assigned:
 
 Maintain a single "## Awaiting Human Input" section at the TOP of BACKLOG.md listing each isolated HITL ask as "<TASK-ID> — <exactly what you need from the human>"; remove entries once resolved.
 
-Keep edits minimal and correct, do NOT touch the Dev Agent lanes in TASKS.md. Stop only after every blocked task has an explicit owning task or a specific human ask.`
+Keep edits minimal and correct, do NOT touch the Dev Agent lanes in TASKS.md. Stop only after every blocked task has an explicit owning task or a specific human ask.
+
+After creating owners, re-verify: re-read BACKLOG.md and TASKS.md and confirm each blocked task either (a) has a concrete owning AFK task whose ID appears in its dependencies/blocking tasks, or (b) a single specific ask in "## Awaiting Human Input". If any blocker is still unowned, create the missing task now rather than finishing. If a pass cannot resolve a blocker after this verification, leave a one-line note in the blocked task's progress notes explaining why, and escalate it in "## Awaiting Human Input" with the exact failing command and the smallest human action needed.`
 
 const idleAuditBody = `This is a periodic, low-cost board-health review. Inspect the current board for stale blocker references, tasks stranded in invalid sections/statuses, unowned technical blockers, and ready tasks that are not scheduled. Correct board-only inconsistencies with the structural board commands and create a focused AFK task for any concrete technical issue without an owner. Do not modify product code, inspect unrelated branches, or invent work. If the board is healthy, make no changes and finish.`
 
@@ -126,6 +128,9 @@ func reconcile(tasks []board.Task) {
 		doneForNow := false
 		if session, ok := finished[teamLeadRole]; ok && session.TaskKey == wanted.TaskKey {
 			doneForNow = failedSessionRetryCounts[failedSessionRetryKey(teamLeadRole, wanted.TaskKey)] >= config.MaxFailedSessionRetries
+			if doneForNow {
+				logx.Event("decomposition retries exhausted for blocked set %v; escalating to idle audit", wanted.TaskKey)
+			}
 		}
 		auditDue := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= teamLeadIdleAuditInterval
 		mu.Unlock()
