@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,6 +243,32 @@ func TestTeamLeadScheduleKeyChangesWhenDependencyCompletes(t *testing.T) {
 
 	if before == after {
 		t.Fatalf("expected Team Lead schedule key to change when CR-001 becomes done: %q", before)
+	}
+}
+
+func TestCompletionFollowUpTaskUsesOnlyEndedDevSessions(t *testing.T) {
+	withRetryTestState(t)
+
+	mu.Lock()
+	finished[devAgent1Role] = FinishedSession{Role: devAgent1Role, Task: "Completed work", TaskKey: "task-1", Outcome: sessionCompleted}
+	finished[devAgent2Role] = FinishedSession{Role: devAgent2Role, Task: "Failed work", TaskKey: "task-2", Outcome: sessionFailed}
+	finished[teamLeadRole] = FinishedSession{Role: teamLeadRole, Task: "Groom", TaskKey: "team", Outcome: sessionCompleted}
+	mu.Unlock()
+
+	task, ok := completionFollowUpTask()
+	if !ok {
+		t.Fatal("expected ended dev sessions to schedule a Team Lead follow-up")
+	}
+	if task.Section != teamLeadFollowUpSection {
+		t.Fatalf("section = %q, want %q", task.Section, teamLeadFollowUpSection)
+	}
+	for _, want := range []string{"Completed work", "Failed work"} {
+		if !strings.Contains(task.Body, want) {
+			t.Fatalf("follow-up body missing %q: %s", want, task.Body)
+		}
+	}
+	if strings.Contains(task.Body, "Groom") {
+		t.Fatalf("follow-up body must exclude Team Lead sessions: %s", task.Body)
 	}
 }
 

@@ -16,6 +16,11 @@ import (
 // decomposition pass whose job is to turn blocked work into runnable (AFK) work.
 const teamLeadDecomposeSection = "Team Lead Decomposition"
 
+// teamLeadFollowUpSection tags the synthetic task scheduled after a dev-agent
+// session ends. It gives the Team Lead one bounded pass to close the loop before
+// more work is assigned.
+const teamLeadFollowUpSection = "Team Lead Completion Follow-Up"
+
 // decomposeBody drives a decomposition grooming pass. Rather than idling when
 // every pending task is blocked, the loop launches this (throttled) so the team
 // lead splits the human-required slice out of each blocked task and converts the
@@ -75,7 +80,9 @@ func reconcile(tasks []board.Task) {
 		backlogTask = &bt
 	}
 
-	if backlogTask != nil && len(invalidRoles) == 0 && allDevAgentsBusyDesired(desired) {
+	followUpTask, needsFollowUp := completionFollowUpTask()
+
+	if backlogTask != nil && !needsFollowUp && len(invalidRoles) == 0 && allDevAgentsBusyDesired(desired) {
 		backlogTask = nil
 	}
 
@@ -83,7 +90,9 @@ func reconcile(tasks []board.Task) {
 		backlogTask = nil
 	}
 
-	if backlogTask != nil {
+	if needsFollowUp {
+		desired[teamLeadRole] = desiredSession{Task: followUpTask, TaskKey: followUpTask.Key}
+	} else if backlogTask != nil {
 		desired[teamLeadRole] = desiredSession{
 			Task:    *backlogTask,
 			TaskKey: teamLeadScheduleKey(*backlogTask, tasks, done),
@@ -197,6 +206,44 @@ func reconcile(tasks []board.Task) {
 
 		startSession(role, task, taskKey, tasks)
 	}
+}
+
+// completionFollowUpTask snapshots completed or failed dev sessions and turns
+// the snapshot into a stable synthetic Team Lead task. The key changes only when
+// a dev session ends or its outcome changes, which naturally debounces the pass.
+func completionFollowUpTask() (board.Task, bool) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	entries := make([]string, 0, len(finished))
+	for role, session := range finished {
+		if _, isDevAgent := config.DevAgentIndexForRole(role); !isDevAgent {
+			continue
+		}
+		if session.Outcome != sessionCompleted && session.Outcome != sessionFailed {
+			continue
+		}
+		entries = append(entries, role+" | "+string(session.Outcome)+" | "+session.Task+" | "+session.TaskKey)
+	}
+	if len(entries) == 0 {
+		return board.Task{}, false
+	}
+	sort.Strings(entries)
+
+	body := `Dev-agent sessions have ended. Perform a board-only completion follow-up before assigning new work.
+
+For every session listed below, inspect its task's current board state and choose exactly one outcome: merged and archived; ready to merge with focused verification recorded; blocked with the exact failing command and owner; or requeued with corrected scope/dependencies. A completed session is not proof of a merge. Do not modify product code or inspect unrelated branches.
+
+Ended sessions:
+- ` + strings.Join(entries, "\n- ")
+
+	return board.Task{
+		Section: teamLeadFollowUpSection,
+		Title:   "Reconcile ended dev-agent sessions",
+		Status:  "In Progress",
+		Body:    body,
+		Key:     "follow-up\x00" + strings.Join(entries, "\x00"),
+	}, true
 }
 
 func teamLeadScheduleKey(task board.Task, tasks []board.Task, done map[string]bool) string {

@@ -295,6 +295,25 @@ number of tasks.
 - Coordinate dependencies and maximize safe parallel work.
 - Prevent merge conflicts.
 
+## Completion Follow-Up
+
+Every Team Lead session begins by reviewing Dev Agent tasks that are In Progress,
+Blocked, or whose agent session has just ended. For each one, record exactly one
+next state before assigning new work:
+
+1. **Merged** — verify the squash commit is on the product base branch, then
+   archive the task as Done.
+2. **Ready to merge** — record the focused verification result and direct the
+   owning agent to rebase, verify, squash-merge, and archive it.
+3. **Blocked** — record the exact failing command, the owning task or human
+   dependency, and the smallest dependency-ordered unblocker.
+4. **Requeued** — correct scope, ownership, and dependencies when the task was
+   assigned incorrectly or its work is incomplete.
+
+Never treat a completed agent session as a completed task: pushed, merged, and
+archived are separate facts. Do not start unrelated work until every recently
+ended session has one of these next states.
+
 ## Phase 1 - Requirement Discovery
 
 Before creating implementation tasks, reduce architectural uncertainty.
