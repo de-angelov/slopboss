@@ -19,7 +19,7 @@ import (
 // any drift between copies would silently bust the cache. It has no leading or
 // trailing newline; callers supply the surrounding whitespace.
 const TestingDisciplineRules = `- Testing discipline: prefer existing test style and user-visible/rendered assertions over inspecting React component internals.
-- Targeted test execution: during active iteration, run ONLY the specific test file covering the assigned task (for example ` + "`npx vitest run path/to/file.test.ts --reporter=basic --no-color`, `go test -run TestName ./...`, `pytest path/to/test_file.py`" + `). Do not run full test suites repeatedly during development as voluminous failure logs flood the transcript and burn tokens. Run the full test suite only once at the end before completing the task.
+- Targeted test execution: during active iteration and before completion, run ONLY the specific test files covering the assigned task (for example ` + "`npx vitest run path/to/file.test.ts --reporter=basic --no-color`, `go test -run TestName ./...`, `pytest path/to/test_file.py`" + `). Your targeted tests and build are the merge gate. Do not use the full suite as a gate; run it only when needed to investigate a suspected cross-cutting regression. If it fails in an unrelated area, note the failing command and path in the task and continue; do not fix unrelated files.
 - Do not add custom test traversal helpers, mock frameworks, DOM harnesses, or new test utilities unless the ticket explicitly requires interaction behavior that cannot be covered otherwise.
 - Test contract, not implementation: assert rendered text, form fields, button labels, form ids/actions, validation messages, and preserved existing behavior.
 - Avoid asserting component prop wiring directly when the same behavior can be observed in rendered output.
@@ -47,8 +47,8 @@ Runtime Rules:
 - The current working directory is already the assigned product repository. Do not cd into "workspaces/repo-agent-*" unless that directory exists from the current working directory.
 - Use the existing repository test stack. If a missing tool or unrelated type error blocks verification, report it instead of expanding scope.
 - File reading discipline: avoid reading entire large files (>300 lines) with unbounded reads. Locate target functions first (e.g. with grep -n) and read targeted line ranges.
-- If verification reveals unrelated failures, stop and mark the task Blocked in TASKS.md. Do not fix unrelated files.
-- For unrelated verification failures, add or update a [BLOCKED] section with the failing command, exact output, out-of-scope file path, and a suggested narrow unblocker task. Set Status: Blocked and Blocked by: Team Lead triage required unless a blocker task already exists.
+- Verification failures outside the assigned task are not blockers. Do not fix unrelated files and do not change the assigned task to Blocked; note the failing command and path in the task's progress notes, then finish when your targeted tests and build pass.
+- Blocked status is reserved for genuine human input (credentials, access, or a decision) or a dependency install that prevents all work. When blocked, record Blocked by: and a specific ask.
 ` + DependencyInstallRules + "\n" + TestingDisciplineRules + "\n" + RebaseAuditRules + "\n"
 }
 
@@ -74,6 +74,15 @@ You are running inside the multi-agent development workflow.
 
 Active role: %s
 
+Board root: %s
+The board files live at these exact absolute paths:
+- BACKLOG.md: %s
+- TASKS.md: %s
+- ARCHIVE.md: %s
+Do not search the filesystem to discover these files. Your current directory is
+the product workspace, not the board root; use the paths above when an edit or
+a narrowly scoped read is necessary.
+
 ================ AGENTS.md COMMON RULES ================
 
 %s
@@ -89,7 +98,7 @@ Active role: %s
 ================ RUNTIME INSTRUCTIONS ================
 
 %s
-`, role, commonInstructions, specificInstructions, tech, roleInstructions)
+`, role, config.RepoRoot, config.BacklogFile, config.TasksFile, config.ArchiveFile, commonInstructions, specificInstructions, tech, roleInstructions)
 
 	perRunSuffix := fmt.Sprintf(`
 ================ PER-RUN CONTEXT (changes every session) ================

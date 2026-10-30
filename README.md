@@ -209,8 +209,8 @@ Set a board-wide default model with `- Codex model: ...` (or `Claude`,
 need different models:
 
 ```markdown
-- Codex dev-agent model: gpt-6.1-sol
-- Codex team-lead model: gpt-6.1-sol
+- Codex dev-agent model: gpt-6-luna
+- Codex team-lead model: gpt-6-luna
 ```
 
 Role-specific values take precedence over a provider-wide value. Leave a value

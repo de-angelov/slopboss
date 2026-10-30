@@ -112,16 +112,46 @@ func TestTeamLeadTemplateDocumentsReadyIsNotAStatus(t *testing.T) {
 	}
 }
 
-func TestTeamLeadTemplateDocumentsTokenOptimization(t *testing.T) {
+func TestTeamLeadTemplateTreatsBlockedWorkAsNonOccupying(t *testing.T) {
 	got := teamLeadTemplate
 	for _, want := range []string{
-		"Tech Stack & Token Optimization (Universal Mechanism)",
-		"Lean & Quiet Test Output",
-		"Targeted Test Execution During Dev",
-		"Continuously audit the tech stack, tooling configuration, and verification commands for token and resource efficiency.",
+		"Treat a dev-agent lane as occupied only by its In Progress task.",
+		"do not consume lane capacity",
+		"Verification failures outside a dev task do not block that task.",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("TEAM_LEAD_AGENT.md template missing token optimization requirement %q:\n%s", want, got)
+			t.Fatalf("TEAM_LEAD_AGENT.md template missing lane rule %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestDevAgentTemplateKeepsUnrelatedFailuresOutOfTheBlockerPath(t *testing.T) {
+	got := devAgentTemplate("main")
+	for _, want := range []string{
+		"Your targeted tests and build are the merge gate.",
+		"do not mark the task Blocked",
+		"Note the failing command and path in the task's",
+		"Blocked tasks may remain in their lane",
+		"Keep the task in its lane",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("DEV_AGENT.md template missing verification rule %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "## Cleanup Protocol") {
+		t.Fatal("DEV_AGENT.md still contains the over-engineered cleanup protocol")
+	}
+}
+
+func TestAgentsTemplateDefinesLaneOccupancy(t *testing.T) {
+	got := agentsTemplate(2)
+	for _, want := range []string{
+		"A dev-agent lane may contain at most one In Progress task.",
+		"do not count as active work and do not consume capacity",
+		"Verification failures outside the assigned task do not make that task Blocked.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("AGENTS.md template missing lane rule %q:\n%s", want, got)
 		}
 	}
 }

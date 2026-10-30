@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -270,6 +271,40 @@ func TestTeamLeadScheduleKeyChangesWhenDevLaneEmpties(t *testing.T) {
 
 	if busy == empty {
 		t.Fatalf("expected Team Lead schedule key to change when a dev lane empties: %q", busy)
+	}
+}
+
+func TestBoardStateHashDetectsAnyBoardEdit(t *testing.T) {
+	dir := t.TempDir()
+	oldBacklog, oldTasks, oldArchive := config.BacklogFile, config.TasksFile, config.ArchiveFile
+	config.BacklogFile = filepath.Join(dir, "BACKLOG.md")
+	config.TasksFile = filepath.Join(dir, "TASKS.md")
+	config.ArchiveFile = filepath.Join(dir, "ARCHIVE.md")
+	t.Cleanup(func() {
+		config.BacklogFile = oldBacklog
+		config.TasksFile = oldTasks
+		config.ArchiveFile = oldArchive
+	})
+
+	for _, path := range []string{config.BacklogFile, config.TasksFile, config.ArchiveFile} {
+		if err := os.WriteFile(path, []byte("# board\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	before := boardStateHash()
+	if before == "" {
+		t.Fatal("expected a board hash")
+	}
+	if again := boardStateHash(); again != before {
+		t.Fatalf("board hash changed without an edit: %q != %q", before, again)
+	}
+
+	if err := os.WriteFile(config.TasksFile, []byte("# board\n\n### New task\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if after := boardStateHash(); after == before {
+		t.Fatal("expected a board edit to change the hash")
 	}
 }
 

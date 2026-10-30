@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -130,8 +131,9 @@ func runTeamLead(ctx context.Context, task board.Task, tasks []board.Task) Sessi
 Role: Team Lead Agent
 Runtime Rules:
 - No code implementation during grooming. Do not review dev-agent branches or merge them. Maintain sensible backlog priorities.
-- If dev-agent lanes are Blocked by unrelated verification failures, create or prioritize a narrow unblocker task before assigning lower-priority feature work.
-- Once an unblocker is archived as Done, update dependent blocked tasks back to Status: In Progress with a progress note.
+- A dev-agent lane is occupied only by its In Progress task. Blocked or rejected tasks do not consume lane capacity; assign ready work into any lane with no In Progress task.
+- Verification failures outside a dev task are not blockers. The dev agent notes them and continues; do not create a blocked lane for them.
+- Once a blocker is archived as Done, update dependent blocked tasks back to Status: In Progress with a progress note.
 
 Efficiency Rules (keep this session small — you are hard-capped at %d turns):
 - The BOARD CONTEXT below is your primary source of truth. It lists every backlog and lane task with its ID, Status, Category, Owner, Dependencies, and Blocking tasks, plus the full list of completed task IDs. A task is unblocked when all of its Dependencies appear in that completed-ID list. Resolve dependencies from that list — do NOT read ARCHIVE.md to check completion status.
@@ -141,7 +143,28 @@ Efficiency Rules (keep this session small — you are hard-capped at %d turns):
 - If you cannot finish within the turn budget, apply the highest-priority board change first; the next grooming pass resumes from the updated board.
 `, config.TeamLeadMaxTurns))
 
-	return runSession(ctx, teamLeadRole, config.TeamLeadPath, p, sessionProvider)
+	before := boardStateHash()
+	outcome := runSession(ctx, teamLeadRole, config.TeamLeadPath, p, sessionProvider)
+	if outcome == sessionCompleted && before != "" && boardStateHash() == before {
+		logx.Event("team lead completed without changing the board; retrying after cooldown")
+		return sessionFailed
+	}
+	return outcome
+}
+
+// boardStateHash fingerprints the three board files so a Team Lead session that
+// exits successfully without changing anything is not mistaken for progress.
+func boardStateHash() string {
+	h := sha256.New()
+	for _, path := range []string{config.BacklogFile, config.TasksFile, config.ArchiveFile} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+		h.Write(data)
+		h.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func runSession(ctx context.Context, role string, workspace string, promptText string, p provider.Provider) SessionOutcome {

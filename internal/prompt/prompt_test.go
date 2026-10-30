@@ -99,17 +99,40 @@ func TestDevAgentPromptIncludesTokenGuardrails(t *testing.T) {
 		"Test contract, not implementation",
 		"do not invent an interaction harness",
 		"avoid adding more test code than implementation code",
-		"If verification reveals unrelated failures, stop and mark the task Blocked",
-		"Set Status: Blocked",
+		"Verification failures outside the assigned task are not blockers",
+		"do not change the assigned task to Blocked",
+		"note the failing command and path in the task's progress notes",
+		"Your targeted tests and build are the merge gate",
+		"Do not use the full suite as a gate",
 		"Dependency install discipline",
 		"timeout 10m npm install",
 		"Clean partial install artifacts",
 		"mark the task Blocked in TASKS.md",
 		"commit the corresponding lockfile",
 		"Do not leave package-manager install processes running",
+		"Rebase audit discipline",
+		"git fetch origin",
+		"git rebase origin",
+		"git diff --name-only --diff-filter=U",
+		"git diff --check",
 	} {
 		if !strings.Contains(built, want) {
 			t.Fatalf("prompt missing %q\n%s", want, built)
+		}
+	}
+}
+
+func TestPromptProvidesExactBoardPaths(t *testing.T) {
+	built := BuildPrompt(config.TeamLeadRole, board.Task{}, nil, "role rules")
+	for _, want := range []string{
+		"Board root: " + config.RepoRoot,
+		"BACKLOG.md: " + config.BacklogFile,
+		"TASKS.md: " + config.TasksFile,
+		"ARCHIVE.md: " + config.ArchiveFile,
+		"Do not search the filesystem to discover these files.",
+	} {
+		if !strings.Contains(built, want) {
+			t.Fatalf("prompt missing %q", want)
 		}
 	}
 }

@@ -51,7 +51,7 @@ const (
 	// DevAgentModel remains the backwards-compatible fallback for Codex boards
 	// created before provider model settings existed. New boards persist this in
 	// CONFIG.md as "Codex dev-agent model" instead.
-	DevAgentModel = "gpt-6.1-sol"
+	DevAgentModel = "gpt-6-luna"
 
 	// DefaultProviderName selects the agent backend; codex is the default and
 	// --provider switches it.

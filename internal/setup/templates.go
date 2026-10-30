@@ -146,8 +146,12 @@ debugging, exploratory edits, or routine commands.
   readiness concept, not a valid backlog Status value.
 - Backlog work becomes active when the Team Lead Agent moves it from BACKLOG.md
   into a dev-agent lane in TASKS.md.
-- Blocked work stays in its dev-agent lane until fixed or reassigned. Blocked
-  work must use Status: Blocked and record Blocked by: when a blocker exists.
+- A dev-agent lane may contain at most one In Progress task. Blocked or rejected
+  tasks in the lane do not count as active work and do not consume capacity; a
+  lane with no In Progress task is available for new work.
+- Verification failures outside the assigned task do not make that task Blocked.
+  Note the failing command and path in the task, then continue. Blocked is
+  reserved for genuine human input; record Blocked by: when a blocker exists.
 - Completed tasks move to ARCHIVE.md with Status: Done and Completed: YYYY-MM-DD.
 - Do not report a task as completed while it remains in TASKS.md.
 
@@ -193,8 +197,8 @@ Applies to every Dev Agent role.
 - Implement assigned tasks.
 - Update dev-agent progress in TASKS.md.
 - Write or update focused tests.
-- Run targeted test files during iteration rather than full test suites.
-- Run verification defined in TECH.md (using lean/quiet reporters to prevent token waste).
+- Run targeted test files during iteration and before completion. The targeted
+  tests and build are the merge gate; the full suite is informational.
 - Commit focused changes.
 - Push the assigned branch.
 - Squash-merge completed work into product %[1]s.
@@ -221,7 +225,7 @@ commit per task.
 
 Before marking work complete:
 
-1. Run relevant verification from TECH.md.
+1. Run the targeted verification from TECH.md for this task.
 2. Commit focused changes.
 3. Push the task branch.
 4. Squash-merge the completed branch into product %[1]s.
@@ -230,7 +234,7 @@ Before marking work complete:
    b. On conflict: list files with 'git diff --name-only --diff-filter=U' and resolve using the zdiff3 base context.
    c. Verify zero leftover markers: git diff --check (must exit 0).
    d. Complete rebase: git add <resolved-files> && git rebase --continue
-   e. Re-run verification tests, squash-merge, and push product %[1]s.
+   e. Re-run targeted verification, squash-merge, and push product %[1]s.
 6. Fetch product %[1]s and verify the recorded squash commit is reachable from
    origin/%[1]s with: git merge-base --is-ancestor <squash-commit> origin/%[1]s.
 7. Record verification and merge notes in the task, including the squash commit.
@@ -239,23 +243,27 @@ Before marking work complete:
 10. Add Completed: YYYY-MM-DD.
 11. Confirm the task no longer appears in TASKS.md.
 
-If work cannot be completed or merged, append a [REJECTED] section to the task
-body with the failing command, exact output, and a short explanation of what
-must be fixed. Keep rejected work in its original dev-agent lane.
+## Verification Protocol
 
-## Blocker Protocol
+1. Your targeted tests and build are the merge gate. Fix failures caused by your
+   change before completing.
+2. If the full suite fails in an unrelated area, do not fix unrelated files and
+   do not mark the task Blocked. Note the failing command and path in the task's
+   progress notes, then finish your task.
+3. Blocked tasks may remain in their lane; they do not consume lane capacity.
+   Handle genuine human dependencies below.
 
-If verification fails outside the assigned task scope:
+## Human Blocker Protocol
+
+If the assigned task genuinely requires human input (credentials, access, or a
+decision) and cannot proceed:
 
 1. Stop work on the assigned task.
-2. Do not fix unrelated files.
-3. Change Status: In Progress to Status: Blocked.
-4. Add a Blocked by: line (Team Lead triage required if no blocker task exists).
-5. Append a [BLOCKED] section with the failing command, exact output, the
-   out-of-scope path proving it, and a suggested narrow unblocker task title.
+2. Set Status: Blocked, add Blocked by:, and state the specific ask.
+3. Keep the task in its lane; blocked work does not consume capacity.
 
-After the blocker is fixed and merged, the Team Lead Agent returns the original
-task to Status: In Progress.
+After the human dependency is resolved, the Team Lead Agent sets the task back
+to Status: In Progress.
 `, baseBranch)
 }
 
@@ -279,7 +287,6 @@ number of tasks.
 ## Responsibilities
 
 - Run requirement discovery with the user.
-- Continuously audit the tech stack, tooling configuration, and verification commands for token and resource efficiency.
 - Groom and prioritize BACKLOG.md.
 - Assign ready work into TASKS.md.
 - Coordinate dependencies and maximize safe parallel work.
@@ -324,20 +331,6 @@ dealing with full-stack features, split horizontally across the stack (storage,
 domain types, data access, API, client hooks, UI, integration) into independent
 atomic micro-steps rather than bundling them.
 
-## Tech Stack & Token Optimization (Universal Mechanism)
-
-During setup, grooming, and task planning, the Team Lead must actively audit and optimize the target project's tooling, scripts, and verification commands for AI token efficiency:
-
-1. **Lean & Quiet Test Output**:
-   - For every tech stack (Vitest, Jest, Pytest, Go, Cargo, Maven, etc.), ensure verification commands specify non-interactive, quiet reporters (e.g. vitest run --reporter=basic, pytest -q, jest --no-colors --reporters=default) that suppress animated terminal spinners and progress rewrites.
-   - Prevent command outputs that dump thousands of lines of progress tokens into agent contexts.
-2. **Targeted Test Execution During Dev**:
-   - In every task's Verification section, provide the exact command to run only the targeted test file for that task during local development, reserving full-suite runs for final verification.
-3. **Ecosystem & Library Reuse**:
-   - Always instruct agents to leverage standard ecosystem libraries over custom infrastructure. Smaller codebases mean smaller diffs, fewer lines to inspect, and less context consumption.
-4. **Context & Board Hygiene**:
-   - Keep board markdown files bounded (<250 lines) and clean. Ensure completed tasks are moved to ARCHIVE.md promptly.
-
 ## Execution Category
 
 Classify every task as:
@@ -363,7 +356,8 @@ Every task must include: Task ID, Category (AFK/HITL), Owner, Branch, Status,
 Dependencies, Blocking tasks, and body sections for Objective (one sentence),
 Scope, Out of Scope, Acceptance Criteria, and Verification (the exact command or
 steps). Implementation agents should never need to infer missing scope.
-In Scope, provide the concrete target file paths and, when using external libraries or complex APIs, provide the exact 3-5 line code snippet/recipe to eliminate exploratory turn waste. In Verification, specify the targeted test command with lean/non-interactive reporter flags (e.g. npx vitest run tests/my-task.test.ts --reporter=basic, pytest -q path/to/test.py, or go test -run TestName ./...) for fast iteration, alongside the full test command.
+In Scope, provide the concrete target file paths. In Verification, give the
+targeted test command first, and list the full-suite command only as a diagnostic.
 
 Use Status: Backlog for unassigned tasks in BACKLOG.md. Do not write
 Status: Ready.
@@ -374,13 +368,15 @@ Before assigning, blocking, or unblocking work:
 
 1. Reconcile dependencies against ARCHIVE.md, TASKS.md, and BACKLOG.md; treat a
    dependency Done in ARCHIVE.md as resolved.
-2. If an active task is Blocked only because all dependencies are now Done, set
+2. Treat a dev-agent lane as occupied only by its In Progress task. Blocked or
+   rejected tasks do not consume lane capacity; assign ready work into any lane
+   that has no In Progress task.
+3. If an active task is Blocked only because all dependencies are now Done, set
    it to Status: In Progress and add a progress note.
-3. Keep no lane idle when a READY, non-overlapping task exists.
+4. Keep no lane idle when a READY, non-overlapping task exists.
 
-If a dev-agent task is blocked by an unrelated verification failure, create or
-prioritize a narrow AFK unblocker at the top of BACKLOG.md scoped only to
-restoring the failing baseline, and assign it before lower-priority feature work.
+Verification failures outside a dev task do not block that task. The dev agent
+notes the failure and continues; do not create a blocked lane for it.
 
 When a task becomes ready: verify the readiness checklist, remove it from
 BACKLOG.md, add it to the appropriate TASKS.md lane, and set Owner, Branch, and
