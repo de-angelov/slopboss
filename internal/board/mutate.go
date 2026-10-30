@@ -24,6 +24,41 @@ type Update struct {
 	Section        string
 }
 
+// CreateBacklogTask adds a fully specified, unassigned task to Backlog.
+func CreateBacklogTask(task Task) (Task, error) {
+	task.ID = strings.TrimSpace(task.ID)
+	task.Title = strings.TrimSpace(task.Title)
+	if task.ID == "" || task.Title == "" || strings.TrimSpace(task.Body) == "" {
+		return Task{}, fmt.Errorf("task ID, title, and body are required")
+	}
+	if _, err := Get(task.ID); err == nil {
+		return Task{}, fmt.Errorf("task %q already exists", task.ID)
+	}
+	if !strings.EqualFold(task.Category, "AFK") && !strings.EqualFold(task.Category, "HITL") {
+		return Task{}, fmt.Errorf("category must be AFK or HITL")
+	}
+	task.Section, task.Owner, task.Status = "Backlog", "Unassigned", "Backlog"
+	if strings.TrimSpace(task.Branch) == "" {
+		task.Branch = "none"
+	}
+	if strings.TrimSpace(task.Dependencies) == "" {
+		task.Dependencies = "none"
+	}
+	block := fmt.Sprintf("### %s\n\nTask ID: %s\nCategory: %s\nOwner: Unassigned\nBranch: %s\nStatus: Backlog\nDependencies: %s\nBlocking tasks: none\n\n%s\n", task.Title, task.ID, strings.ToUpper(task.Category), task.Branch, task.Dependencies, strings.TrimSpace(task.Body))
+	data, err := os.ReadFile(config.BacklogFile)
+	if err != nil {
+		return Task{}, err
+	}
+	content := string(data)
+	if !strings.Contains(content, "## Backlog") {
+		return Task{}, fmt.Errorf("BACKLOG.md has no ## Backlog section")
+	}
+	if err := writeAtomic(config.BacklogFile, strings.TrimRight(content, "\n")+"\n\n"+block); err != nil {
+		return Task{}, err
+	}
+	return Get(task.ID)
+}
+
 // Get returns the task with id from any board file. It deliberately reads the
 // archive too: normal scheduler reads skip historic archive sections for speed.
 func Get(id string) (Task, error) {

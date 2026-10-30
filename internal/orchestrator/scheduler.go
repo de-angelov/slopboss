@@ -27,6 +27,8 @@ const teamLeadFollowUpSection = "Team Lead Completion Follow-Up"
 // autonomous remainder into assignable AFK work.
 const decomposeBody = `No dependency-ready work is available to assign. Do NOT idle. This is a DECOMPOSITION pass: turn blocked work into autonomously-runnable (AFK) work wherever possible, and isolate only what genuinely needs a human.
 
+Every concrete technical blocker must have an owning task. If no existing task explicitly owns the fix, create a focused AFK task using slopboss board create TASK-ID --title ... --category AFK --dependencies ... --body ... . Include Objective, Scope, Out of Scope, Acceptance Criteria, and exact Verification. Link its ID in the blocked task's dependencies/blocking tasks and preserve exact failure evidence. Never finish with an orphan blocker.
+
 For each task that cannot currently be assigned:
 1. Separate what actually needs a human (a decision, credential, access grant, or an architectural choice) from what a dev agent could do unattended.
 2. If part needs a human and part is autonomous, SPLIT it:
@@ -37,7 +39,7 @@ For each task that cannot currently be assigned:
 
 Maintain a single "## Awaiting Human Input" section at the TOP of BACKLOG.md listing each isolated HITL ask as "<TASK-ID> — <exactly what you need from the human>"; remove entries once resolved.
 
-Keep edits minimal and correct, do NOT touch the Dev Agent lanes in TASKS.md, then stop.`
+Keep edits minimal and correct, do NOT touch the Dev Agent lanes in TASKS.md. Stop only after every blocked task has an explicit owning task or a specific human ask.`
 
 type desiredSession struct {
 	Task    board.Task

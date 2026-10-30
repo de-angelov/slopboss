@@ -37,6 +37,23 @@ var boardGetCmd = &cobra.Command{
 }
 
 var (
+	createID, createTitle, createCategory, createBranch, createDependencies, createBody string
+)
+
+var boardCreateCmd = &cobra.Command{
+	Use:   "create TASK-ID",
+	Short: "Create a validated AFK or HITL task in the backlog",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		task, err := board.CreateBacklogTask(board.Task{ID: args[0], Title: createTitle, Category: createCategory, Branch: createBranch, Dependencies: createDependencies, Body: createBody})
+		if err != nil {
+			return err
+		}
+		return writeJSON(task)
+	},
+}
+
+var (
 	setOwner, setBranch, setStatus, setCategory, setDependencies, setBlockedBy string
 	setClearBlockedBy                                                          bool
 	setFile, setSection                                                        string
@@ -86,6 +103,11 @@ func init() {
 	boardSetCmd.Flags().BoolVar(&setClearBlockedBy, "clear-blocked-by", false, "remove the Blocked by field")
 	boardSetCmd.Flags().StringVar(&setFile, "file", "", "destination: backlog, tasks, or archive")
 	boardSetCmd.Flags().StringVar(&setSection, "section", "", "destination section; requires --file")
-	boardCmd.AddCommand(boardGetCmd, boardSetCmd)
+	boardCreateCmd.Flags().StringVar(&createTitle, "title", "", "task title")
+	boardCreateCmd.Flags().StringVar(&createCategory, "category", "AFK", "AFK or HITL")
+	boardCreateCmd.Flags().StringVar(&createBranch, "branch", "none", "proposed task branch")
+	boardCreateCmd.Flags().StringVar(&createDependencies, "dependencies", "none", "dependency task IDs")
+	boardCreateCmd.Flags().StringVar(&createBody, "body", "", "task body with Objective, Scope, Out of Scope, Acceptance Criteria, Verification")
+	boardCmd.AddCommand(boardGetCmd, boardSetCmd, boardCreateCmd)
 	rootCmd.AddCommand(boardCmd)
 }
