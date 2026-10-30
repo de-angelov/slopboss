@@ -56,6 +56,10 @@ func RunLoop(parent context.Context, providerName string, ui UI) error {
 				logx.Event("failed to read board files: %v", err)
 				ui.SetError(err)
 			} else {
+				if err := board.RefreshMainBranch(); err != nil {
+					logx.Event("failed to refresh origin/%s before merge reconciliation: %v", config.BaseBranch, err)
+					ui.SetError(err)
+				}
 				// Refresh the merged-to-main task set before reconciling so work
 				// that landed on main but was never archived still counts as done
 				// for dependency resolution and cancellation this tick.

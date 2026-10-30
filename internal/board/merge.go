@@ -28,6 +28,17 @@ var (
 	mergedMainMu  sync.Mutex
 )
 
+// RefreshMainBranch updates the team-lead workspace's origin/base ref before
+// merge and archive reconciliation. This keeps squash-merge verification tied
+// to the repository's current integration branch rather than to the last time
+// an agent session happened to run git fetch.
+func RefreshMainBranch() error {
+	if !git.WorkspaceExists(config.TeamLeadRole) {
+		return nil
+	}
+	return git.FetchBaseBranch(config.TeamLeadPath)
+}
+
 // mergedIDFromSubject returns the leading task ID of a main commit subject, or ""
 // if the subject does not begin with a task-ID token.
 func mergedIDFromSubject(subject string) string {

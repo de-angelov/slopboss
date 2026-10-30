@@ -219,7 +219,9 @@ Dev agents must never:
 
 Each dev-agent task uses its own branch, e.g. agent/<n>/<short-slug>. Completed
 task branches must be squash-merged into product %[1]s so %[1]s receives one final
-commit per task.
+commit per task. The squash commit subject must begin with the task ID, for example
+TASK-123: add schema validation; Slopboss uses that ID to recognize merged work
+even if an agent exits before it updates ARCHIVE.md.
 
 ## Completion Workflow
 
@@ -228,7 +230,8 @@ Before marking work complete:
 1. Run the targeted verification from TECH.md for this task.
 2. Commit focused changes.
 3. Push the task branch.
-4. Squash-merge the completed branch into product %[1]s.
+4. Squash-merge the completed branch into product %[1]s, using a commit subject
+   that begins with the task ID (for example TASK-123: concise summary).
 5. Push product %[1]s. If push is rejected because origin moved ahead, do not abort or block:
    a. Run: git fetch origin %[1]s && git rebase origin/%[1]s
    b. On conflict: list files with 'git diff --name-only --diff-filter=U' and resolve using the zdiff3 base context.

@@ -188,6 +188,14 @@ func MainCommitSubjects(workspace string, limit int) []string {
 	return subjects
 }
 
+// FetchBaseBranch refreshes the local origin/<base> ref used by merge
+// reconciliation. Squash commits are new commits, so stale remote-tracking refs
+// would otherwise make already-landed work look unmerged until another agent
+// happens to fetch.
+func FetchBaseBranch(workspace string) error {
+	return RunGitChecked(workspace, "fetch", "origin", config.BaseBranch)
+}
+
 // MainContainsCommit reports whether commit is reachable from origin/<base>.
 // It reads the workspace's already-fetched origin ref and does not fetch.
 func MainContainsCommit(workspace string, commit string) bool {
