@@ -2,7 +2,7 @@
 
 <img src="art/slopboss-banner.png" alt="SLOPBOSS — Autonomous Workforce Solutions" width="860">
 
-<img src="art/slopboss-hero-card.png" alt="slopboss mascot — a grinning corporate boss on a retro CRT monitor, surrounded by tiny robot developers typing at its keyboard" width="420">
+<img src="art/slopboss-hero.png" alt="slopboss mascot — a grinning corporate boss on a retro CRT monitor, surrounded by tiny robot developers typing at its keyboard" width="340">
 
 **AN AUTONOMOUS ORCHESTRATOR FOR BOARD-DRIVEN, MULTI-AGENT SOFTWARE DEVELOPMENT**
 
