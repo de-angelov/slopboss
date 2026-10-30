@@ -41,7 +41,7 @@ func New() *AgentUI {
 		header: tview.NewTextView().SetDynamicColors(true),
 		footer: tview.NewTextView().SetDynamicColors(true),
 	}
-	u.table.SetBorder(true).SetTitle(" Agents ")
+	u.table.SetBorder(true).SetBorderColor(paletteMint).SetTitle("  SLOPBOSS / AGENT FLOOR  ").SetTitleColor(paletteMint)
 
 	layout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(u.header, 2, 0, false).
@@ -49,6 +49,9 @@ func New() *AgentUI {
 		AddItem(u.footer, 2, 0, false)
 
 	u.app.SetRoot(layout, true)
+	u.header.SetBackgroundColor(paletteInk)
+	u.table.SetBackgroundColor(paletteInk)
+	u.footer.SetBackgroundColor(paletteInk)
 	u.app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() == tcell.KeyCtrlC || ev.Rune() == 'q' {
 			u.app.Stop()
@@ -93,7 +96,7 @@ func (u *AgentUI) render() {
 	snap := orchestrator.Snapshot()
 	rows := buildRows(tasks, snap)
 
-	head := fmt.Sprintf("[::b]slopboss[::-]  board: %s   provider: %s   agents: %d   %s",
+	head := fmt.Sprintf("[::b][#58D6A7]S L O P B O S S[::-]  [#D8D1B2]board: %s   provider: %s   agents: %d   %s",
 		filepath.Base(config.RepoRoot), snap.ProviderName, config.DevAgentCount, time.Now().Format("15:04:05"))
 	if readErr != nil {
 		head += fmt.Sprintf("   [red]board error: %s[-]", tview.Escape(readErr.Error()))
@@ -103,40 +106,49 @@ func (u *AgentUI) render() {
 	u.table.Clear()
 	for c, title := range []string{"", "ROLE", "STATUS", "TASK", "BRANCH"} {
 		u.table.SetCell(0, c, tview.NewTableCell(title).
-			SetTextColor(tcell.ColorYellow).
+			SetTextColor(paletteSand).
 			SetAttributes(tcell.AttrBold).
 			SetSelectable(false))
 	}
 	for i, row := range rows {
 		r := i + 1
-		u.table.SetCell(r, 0, tview.NewTableCell(row.marker).SetTextColor(tcell.ColorGreen))
-		u.table.SetCell(r, 1, tview.NewTableCell(row.role))
+		u.table.SetCell(r, 0, tview.NewTableCell(row.marker).SetTextColor(paletteMint))
+		u.table.SetCell(r, 1, tview.NewTableCell(row.role).SetTextColor(paletteSand))
 		u.table.SetCell(r, 2, tview.NewTableCell(row.status).SetTextColor(statusColor(row.status)))
-		u.table.SetCell(r, 3, tview.NewTableCell(tview.Escape(truncate(row.task, 48))).SetExpansion(1))
-		u.table.SetCell(r, 4, tview.NewTableCell(tview.Escape(truncate(row.branch, 36))))
+		u.table.SetCell(r, 3, tview.NewTableCell(tview.Escape(truncate(row.task, 48))).SetTextColor(palettePaper).SetExpansion(1))
+		u.table.SetCell(r, 4, tview.NewTableCell(tview.Escape(truncate(row.branch, 36))).SetTextColor(paletteMuted))
 	}
 
-	u.footer.SetText(fmt.Sprintf("latest: %s\n[gray]press q or Ctrl-C to stop[-]", tview.Escape(logx.LatestLogLine())))
+	u.footer.SetText(fmt.Sprintf("[#58D6A7]LATEST[-] [#D8D1B2]%s[-]\n[#788982]q / Ctrl-C to leave dashboard[-]", tview.Escape(logx.LatestLogLine())))
 }
+
+var (
+	paletteInk   = tcell.NewHexColor(0x171916)
+	paletteMint  = tcell.NewHexColor(0x58D6A7)
+	paletteSand  = tcell.NewHexColor(0xD8D1B2)
+	palettePaper = tcell.NewHexColor(0xF0EBD7)
+	paletteMuted = tcell.NewHexColor(0x788982)
+	paletteCoral = tcell.NewHexColor(0xF1785A)
+)
 
 // statusColor maps a row status to a tcell color, preserving the semantics of
 // the previous ANSI renderer.
 func statusColor(status string) tcell.Color {
 	switch status {
 	case "running", "completed":
-		return tcell.ColorGreen
+		return paletteMint
 	case "failed", "board error":
-		return tcell.ColorRed
+		return paletteCoral
 	case "usage-limited":
-		return tcell.ColorFuchsia
+		return tcell.NewHexColor(0xCE84B8)
 	case "In Progress":
-		return tcell.ColorAqua
+		return paletteMint
 	case "Blocked", "backlog pending":
-		return tcell.ColorYellow
+		return paletteSand
 	case "idle", "waiting for lane", "Backlog":
-		return tcell.ColorGray
+		return paletteMuted
 	default:
-		return tcell.ColorWhite
+		return palettePaper
 	}
 }
 
