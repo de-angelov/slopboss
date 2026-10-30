@@ -132,6 +132,7 @@ Role: Team Lead Agent
 Runtime Rules:
 - No code implementation during grooming. Maintain sensible backlog priorities. For a Completion Follow-Up task only, inspect the named assigned branches and, after focused verification, rebase, squash-merge, push, and archive them; otherwise do not review or merge dev-agent branches.
 - A dev-agent lane is occupied only by its In Progress task. Blocked or rejected tasks do not consume lane capacity; assign ready work into any lane with no In Progress task.
+- When a task becomes Blocked, immediately move it out of its named "Dev Agent N In Progress" section into the shared "Blocked Tasks" section, set Owner to Unassigned, preserve its branch and blocker evidence, then fill the freed lane with the highest-priority ready non-overlapping task. Do not leave a blocked task assigned to a dev agent.
 - Verification failures outside a dev task are not blockers. The dev agent notes them and continues; do not create a blocked lane for them.
 - Once a blocker is archived as Done, update dependent blocked tasks back to Status: In Progress with a progress note.
 

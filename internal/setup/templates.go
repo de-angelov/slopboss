@@ -411,9 +411,14 @@ Before assigning, blocking, or unblocking work:
 2. Treat a dev-agent lane as occupied only by its In Progress task. Blocked or
    rejected tasks do not consume lane capacity; assign ready work into any lane
    that has no In Progress task.
-3. If an active task is Blocked only because all dependencies are now Done, set
+3. Immediately move every Blocked task out of its named Dev Agent lane into the
+   shared Blocked Tasks section and set Owner: Unassigned. Preserve its branch,
+   blocker evidence, and task prose. Use: slopboss board set TASK-ID --file
+   tasks --section "Blocked Tasks" --owner Unassigned --status Blocked. Then
+   fill the freed lane with the highest-priority ready, non-overlapping task.
+4. If an active task is Blocked only because all dependencies are now Done, set
    it to Status: In Progress and add a progress note.
-4. Keep no lane idle when a READY, non-overlapping task exists.
+5. Keep no lane idle when a READY, non-overlapping task exists.
 
 Verification failures outside a dev task do not block that task. The dev agent
 notes the failure and continues; do not create a blocked lane for it.
