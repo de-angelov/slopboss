@@ -78,6 +78,9 @@ func TestSetRejectsInvalidStructuralValues(t *testing.T) {
 	if _, err := Set("TASK-3", Update{Section: "Backlog"}); err == nil || !strings.Contains(err.Error(), "--file and --section") {
 		t.Fatalf("Set ambiguous move error = %v", err)
 	}
+	if _, err := Set("TASK-3", Update{File: "tasks", Section: "Team Lead In Progress"}); err == nil || !strings.Contains(err.Error(), "Team Lead coordination") {
+		t.Fatalf("Set Team Lead lane error = %v", err)
+	}
 }
 
 func withBoardFiles(t *testing.T, root string) {

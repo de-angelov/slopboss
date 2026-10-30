@@ -122,6 +122,9 @@ func validateUpdate(u Update) error {
 			return err
 		}
 	}
+	if strings.HasPrefix(strings.TrimSpace(u.Section), "Team Lead") {
+		return fmt.Errorf("Team Lead coordination tasks stay in BACKLOG.md with Status: Backlog; do not create a Team Lead lane")
+	}
 	if u.Status != "" {
 		switch normalizeStatus(u.Status) {
 		case "Backlog", "In Progress", "Blocked", "Done":
