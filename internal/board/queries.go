@@ -237,3 +237,46 @@ func UnblockedBlockedTask(tasks []Task) Task {
 	}
 	return Task{}
 }
+
+// HasOrphanBlocker reports whether any task sitting in the shared "Blocked Tasks"
+// section is a concrete technical blocker with no owning task: nothing in the
+// board lists it in its Dependencies or BlockingTasks, and it is not a HITL ask
+// that a human is expected to resolve. Such tasks stall the pipeline until the
+// Team Lead decomposes them, so the reconcile loop should force a decomposition
+// pass even when other ready work exists.
+func HasOrphanBlocker(tasks []Task) bool {
+	owners := map[string]bool{}
+	for _, t := range tasks {
+		for _, dep := range strings.Split(t.Dependencies, ",") {
+			dep = strings.TrimSpace(dep)
+			if dep != "" {
+				owners[dep] = true
+			}
+		}
+		for _, b := range strings.Split(t.BlockingTasks, ",") {
+			b = strings.TrimSpace(b)
+			if b != "" {
+				owners[b] = true
+			}
+		}
+	}
+	for _, t := range tasks {
+		if t.Section != "Blocked Tasks" {
+			continue
+		}
+		if !strings.EqualFold(t.Status, "Blocked") {
+			continue
+		}
+		if strings.EqualFold(t.Category, "HITL") {
+			continue
+		}
+		id := t.ID
+		if id == "" {
+			id = t.Title
+		}
+		if !owners[id] {
+			return true
+		}
+	}
+	return false
+}

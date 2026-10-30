@@ -106,6 +106,13 @@ func reconcile(tasks []board.Task) {
 		backlogTask = &bt
 	}
 
+	// Orphan blockers take priority over grooming: a blocked task with no
+	// owning task stalls downstream work, so force a decomposition pass even
+	// when ready backlog work exists. The pass is throttled by the blocked set.
+	if board.HasOrphanBlocker(tasks) && backlogTask != nil {
+		backlogTask = nil
+	}
+
 	followUpTask, needsFollowUp := completionFollowUpTask()
 
 	if backlogTask != nil && !needsFollowUp && len(invalidRoles) == 0 && allDevAgentsBusyDesired(desired) {
