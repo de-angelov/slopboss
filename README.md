@@ -1,17 +1,6 @@
 <div align="center">
 
-                                                
-                                            █████ █     █████ █████ █████ █████ █████ █████ 
-                                            █     █     █   █ █   █ █   █ █   █ █     █     
-                                            █████ █     █   █ █████ █████ █   █ █████ █████ 
-                                                █ █     █   █ █     █   █ █   █     █     █ 
-                                            █████ █████ █████ █     █████ █████ █████ █████ 
-                                            
-                                            ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-                                            ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-                                            
-                                                A U T O N O M O U S   W O R K F O R C E     
-                                             
+<img src="art/slopboss-header.png" alt="SLOPBOSS — Autonomous Workforce Solutions" width="860">
 
 <img src="art/slopboss-hero.png" alt="slopboss mascot — a grinning corporate boss on a retro CRT monitor, surrounded by tiny robot developers typing at its keyboard" width="340">
 
