@@ -1,6 +1,14 @@
 <div align="center">
 
-<img src="art/slopboss-banner.png" alt="SLOPBOSS — Autonomous Workforce Solutions" width="860">
+```text
+╔══════════════════════════════════════════════════════════════════════╗
+║                                                                      ║
+║    S L O P B O S S   //   A U T O N O M O U S   W O R K F O R C E    ║
+║                                                                      ║
+║           B O A R D - D R I V E N   M U L T I - A G E N T            ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+```
 
 <img src="art/slopboss-hero.png" alt="slopboss mascot — a grinning corporate boss on a retro CRT monitor, surrounded by tiny robot developers typing at its keyboard" width="340">
 
