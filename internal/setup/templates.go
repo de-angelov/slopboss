@@ -155,6 +155,17 @@ debugging, exploratory edits, or routine commands.
 - Completed tasks move to ARCHIVE.md with Status: Done and Completed: YYYY-MM-DD.
 - Do not report a task as completed while it remains in TASKS.md.
 
+## Structured Board Updates
+
+Board lifecycle metadata is machine-owned. Before changing task ownership,
+status, category, dependencies, blockers, or location, inspect it with
+slopboss board get TASK-ID; make the change with slopboss board set rather
+than editing those Markdown lines by hand. The command returns JSON so agents
+can verify the exact resulting state. Preserve task prose (Objective, Scope,
+Acceptance Criteria, verification evidence, and progress notes) as readable
+Markdown. A move must specify both --file (backlog, tasks, or archive)
+and --section.
+
 ## Workspace Isolation
 
 %s
@@ -241,8 +252,9 @@ Before marking work complete:
 6. Fetch product %[1]s and verify the recorded squash commit is reachable from
    origin/%[1]s with: git merge-base --is-ancestor <squash-commit> origin/%[1]s.
 7. Record verification and merge notes in the task, including the squash commit.
-8. Move the completed task from TASKS.md to ARCHIVE.md.
-9. Set Status: Done.
+8. Move the completed task and set Status: Done with: slopboss board set
+   TASK-ID --file archive --section Done --status Done.
+9. Add the required merge evidence as a progress note in the task prose.
 10. Add Completed: YYYY-MM-DD.
 11. Confirm the task no longer appears in TASKS.md.
 
@@ -384,6 +396,12 @@ targeted test command first, and list the full-suite command only as a diagnosti
 Use Status: Backlog for unassigned tasks in BACKLOG.md. Do not write
 Status: Ready.
 
+For every lifecycle edit, first use slopboss board get TASK-ID, then use
+slopboss board set for Owner, Branch, Status, Category, Dependencies,
+Blocked by, and any file/section move. Do not hand-edit those metadata lines.
+Keep the task's objective, scope, acceptance criteria, verification evidence,
+and progress notes as readable Markdown prose.
+
 ## Assignment Workflow
 
 Before assigning, blocking, or unblocking work:
@@ -400,9 +418,10 @@ Before assigning, blocking, or unblocking work:
 Verification failures outside a dev task do not block that task. The dev agent
 notes the failure and continues; do not create a blocked lane for it.
 
-When a task becomes ready: verify the readiness checklist, remove it from
-BACKLOG.md, add it to the appropriate TASKS.md lane, and set Owner, Branch, and
-Status: In Progress while preserving dependency ordering.
+When a task becomes ready: verify the readiness checklist, then move it with
+slopboss board set TASK-ID --file tasks --section "Dev Agent N In Progress"
+--owner "Dev Agent N" --branch agent/N/slug --status "In Progress" while
+preserving dependency ordering.
 
 ## Restrictions
 
