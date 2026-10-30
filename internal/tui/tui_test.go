@@ -7,6 +7,7 @@ import (
 
 	"github.com/de-angelov/slopboss/internal/board"
 	"github.com/de-angelov/slopboss/internal/config"
+	"github.com/de-angelov/slopboss/internal/orchestrator"
 )
 
 func TestAgentUIRenderPopulatesTable(t *testing.T) {
@@ -49,6 +50,20 @@ func TestAgentUIRenderPopulatesTable(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("Dev Agent 1 row not rendered")
+	}
+}
+
+func TestBuildRowsShowsOwnedBlockedTaskInsteadOfIdle(t *testing.T) {
+	oldCount := config.DevAgentCount
+	config.DevAgentCount = 1
+	t.Cleanup(func() { config.DevAgentCount = oldCount })
+
+	rows := buildRows([]board.Task{{
+		Section: "Dev Agent 1 In Progress", Title: "Compiler blocker", Owner: "Dev Agent 1",
+		Branch: "agent/1/blocker", Status: "Blocked",
+	}}, orchestrator.StateSnapshot{})
+	if got := rows[1]; got.status != "Blocked" || got.task != "Compiler blocker" {
+		t.Fatalf("blocked row = %#v", got)
 	}
 }
 

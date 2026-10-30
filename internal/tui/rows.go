@@ -40,6 +40,12 @@ func buildRows(tasks []board.Task, snap orchestrator.StateSnapshot) []agentRow {
 				rows[i].task = fmt.Sprintf("%d active tasks", len(activeTasks))
 				continue
 			}
+			if blocked := blockedTaskForRole(tasks, rows[i].role); blocked.Title != "" {
+				rows[i].status = "Blocked"
+				rows[i].task = blocked.Title
+				rows[i].branch = blocked.Branch
+				continue
+			}
 		}
 
 		task := board.FindDesiredTaskForRole(tasks, rows[i].role)
@@ -68,6 +74,18 @@ func buildRows(tasks []board.Task, snap orchestrator.StateSnapshot) []agentRow {
 	}
 
 	return rows
+}
+
+// blockedTaskForRole exposes a real owner-level blocker in the dashboard. A
+// blocked task does not occupy a scheduler lane, but calling that agent "idle"
+// hides why the lane has no running session.
+func blockedTaskForRole(tasks []board.Task, role string) board.Task {
+	for _, task := range tasks {
+		if task.Owner == role && task.Status == "Blocked" {
+			return task
+		}
+	}
+	return board.Task{}
 }
 
 func truncate(s string, limit int) string {
