@@ -90,6 +90,9 @@ func startSession(role string, task board.Task, taskKey string, tasks []board.Ta
 			if outcome == sessionCompleted {
 				delete(failedSessionRetryCounts, failedSessionRetryKey(role, taskKey))
 			}
+			if outcome != sessionCancelled && outcome != sessionUsageLimited {
+				recordCircuitResultLocked(circuitKey(role, taskKey), outcome == sessionCompleted, time.Now())
+			}
 			mu.Unlock()
 		}()
 

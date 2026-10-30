@@ -34,6 +34,7 @@ var (
 	running                  = map[string]RunningSession{}
 	finished                 = map[string]FinishedSession{}
 	failedSessionRetryCounts = map[string]int{}
+	circuitBreakers          = map[string]*circuitBreaker{}
 	codexPausedUntil         time.Time
 	lastTeamLeadActivity     time.Time
 
@@ -78,12 +79,33 @@ const (
 	sessionUnknown      SessionOutcome = "unknown"
 )
 
+// circuitBreaker tracks consecutive failures for a task and opens after a
+// threshold, preventing a persistently failing task from being retried on every
+// poll. It uses exponential cooldown with a cap.
+type circuitBreaker struct {
+	failures  int
+	state     string // "closed", "open", "half-open"
+	openedAt  time.Time
+	cooldown  time.Duration
+}
+
+const (
+	circuitClosed    = "closed"
+	circuitOpen      = "open"
+	circuitHalfOpen  = "half-open"
+	circuitThreshold = 3
+	circuitBaseDelay = 5 * time.Minute
+	circuitMaxDelay  = 60 * time.Minute
+)
+
+// StateSnapshot addition: circuit-open task keys.
 // StateSnapshot is an immutable copy of the orchestrator's session state, taken
 // under mu, for the UI to render without touching the live maps or the mutex.
 type StateSnapshot struct {
 	Running      map[string]RunningSession
 	Finished     map[string]FinishedSession
 	ProviderName string
+	CircuitOpen  map[string]bool
 }
 
 // Snapshot returns a consistent copy of the current session state.
@@ -92,14 +114,20 @@ func Snapshot() StateSnapshot {
 	defer mu.Unlock()
 
 	snap := StateSnapshot{
-		Running:  make(map[string]RunningSession, len(running)),
-		Finished: make(map[string]FinishedSession, len(finished)),
+		Running:     make(map[string]RunningSession, len(running)),
+		Finished:    make(map[string]FinishedSession, len(finished)),
+		CircuitOpen: make(map[string]bool),
 	}
 	for k, v := range running {
 		snap.Running[k] = v
 	}
 	for k, v := range finished {
 		snap.Finished[k] = v
+	}
+	for k, cb := range circuitBreakers {
+		if cb != nil && cb.state == circuitOpen {
+			snap.CircuitOpen[k] = true
+		}
 	}
 	if sessionProvider != nil {
 		snap.ProviderName = sessionProvider.Name()

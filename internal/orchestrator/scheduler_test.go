@@ -341,11 +341,36 @@ func withRetryTestState(t *testing.T) {
 	oldLogFilePath := config.LogFilePath
 	config.LogFilePath = filepath.Join(t.TempDir(), "orchestrator.log")
 	failedSessionRetryCounts = map[string]int{}
+	circuitBreakers = map[string]*circuitBreaker{}
 	codexPausedUntil = time.Time{}
 
 	t.Cleanup(func() {
 		config.LogFilePath = oldLogFilePath
 		failedSessionRetryCounts = map[string]int{}
+		circuitBreakers = map[string]*circuitBreaker{}
 		codexPausedUntil = time.Time{}
 	})
+}
+
+
+func TestCircuitBreakerOpensAfterThreshold(t *testing.T) {
+	withRetryTestState(t)
+	now := time.Now()
+	key := "role\x00task-1"
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	for i := 0; i < circuitThreshold; i++ {
+		recordCircuitResultLocked(key, false, now)
+	}
+	if !circuitOpenLocked(key, now) {
+		t.Fatal("expected circuit to be open after threshold failures")
+	}
+
+	// Success resets
+	recordCircuitResultLocked(key, true, now.Add(circuitBaseDelay))
+	if circuitOpenLocked(key, now.Add(circuitBaseDelay)) {
+		t.Fatal("expected circuit to be closed after success")
+	}
 }

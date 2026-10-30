@@ -238,10 +238,17 @@ func reconcile(tasks []board.Task) {
 			delete(finished, role)
 			alreadyFinished = false
 		}
+		ck := circuitKey(role, taskKey)
+		circuitOpen := circuitOpenLocked(ck, now)
 		mu.Unlock()
 
 		if resumeAfterUsageLimit {
 			logx.Event("resuming %s after usage-limit cooldown elapsed", role)
+		}
+
+		if circuitOpen {
+			logx.Event("skipping %s because circuit breaker is open for %s", role, task.Title)
+			continue
 		}
 
 		if exists || alreadyFinished {
@@ -480,4 +487,62 @@ func pauseLaunchesAfterUsageLimit(now time.Time) time.Time {
 
 func pauseCodexLaunchesAfterUsageLimit(now time.Time) time.Time {
 	return pauseLaunchesAfterUsageLimit(now)
+}
+
+// circuitKey returns the map key for a task's circuit breaker.
+func circuitKey(role, taskKey string) string {
+	return role + "\x00" + taskKey
+}
+
+// circuitOpenLocked reports whether the circuit for key is currently open (i.e.
+// the task should not be retried yet). It transitions half-open circuits to
+// allow a single probe attempt once the cooldown has elapsed. Caller must hold mu.
+func circuitOpenLocked(key string, now time.Time) bool {
+	cb, ok := circuitBreakers[key]
+	if !ok || cb == nil {
+		return false
+	}
+	switch cb.state {
+	case circuitClosed:
+		return false
+	case circuitOpen:
+		if now.Sub(cb.openedAt) >= cb.cooldown {
+			cb.state = circuitHalfOpen
+			return false
+		}
+		return true
+	case circuitHalfOpen:
+		return false
+	}
+	return false
+}
+
+// recordCircuitResultLocked updates the circuit breaker for key based on the
+// outcome of a session. Caller must hold mu.
+func recordCircuitResultLocked(key string, success bool, now time.Time) {
+	cb, ok := circuitBreakers[key]
+	if !ok || cb == nil {
+		cb = &circuitBreaker{state: circuitClosed}
+		circuitBreakers[key] = cb
+	}
+	if success {
+		cb.failures = 0
+		cb.state = circuitClosed
+		cb.cooldown = 0
+		return
+	}
+	cb.failures++
+	if cb.failures >= circuitThreshold {
+		cb.state = circuitOpen
+		cb.openedAt = now
+		if cb.cooldown == 0 {
+			cb.cooldown = circuitBaseDelay
+		} else {
+			cb.cooldown *= 2
+			if cb.cooldown > circuitMaxDelay {
+				cb.cooldown = circuitMaxDelay
+			}
+		}
+		logx.Event("circuit breaker opened for %s after %d failures; cooldown %s", key, cb.failures, cb.cooldown)
+	}
 }
