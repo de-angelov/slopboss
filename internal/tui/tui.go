@@ -41,7 +41,7 @@ func New() *AgentUI {
 		header: tview.NewTextView().SetDynamicColors(true),
 		footer: tview.NewTextView().SetDynamicColors(true),
 	}
-	u.table.SetBorder(true).SetBorderColor(paletteMint).SetTitle("  SLOPBOSS / AGENT FLOOR  ").SetTitleColor(paletteMint)
+	u.table.SetBorder(true).SetBorderColor(paletteMint).SetTitle("  SLOPBOSS INDUSTRIES / CONTROL ROOM  ").SetTitleColor(paletteMint)
 
 	layout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(u.header, 2, 0, false).
@@ -96,7 +96,7 @@ func (u *AgentUI) render() {
 	snap := orchestrator.Snapshot()
 	rows := buildRows(tasks, snap)
 
-	head := fmt.Sprintf("[::b][#58D6A7]S L O P B O S S[::-]  [#D8D1B2]board: %s   provider: %s   agents: %d   %s",
+	head := fmt.Sprintf("[::b][#39FF14]SLOPBOSS INDUSTRIES[::-]  [#7CFF6B]// AGENT FLOOR[::-]  [#4a7a4a]board: %s   provider: %s   agents: %d   %s",
 		filepath.Base(config.RepoRoot), snap.ProviderName, config.DevAgentCount, time.Now().Format("15:04:05"))
 	if readErr != nil {
 		head += fmt.Sprintf("   [red]board error: %s[-]", tview.Escape(readErr.Error()))
@@ -119,16 +119,16 @@ func (u *AgentUI) render() {
 		u.table.SetCell(r, 4, tview.NewTableCell(tview.Escape(truncate(row.branch, 36))).SetTextColor(paletteMuted))
 	}
 
-	u.footer.SetText(fmt.Sprintf("[#58D6A7]LATEST[-] [#D8D1B2]%s[-]\n[#788982]q / Ctrl-C to leave dashboard[-]", tview.Escape(logx.LatestLogLine())))
+	u.footer.SetText(fmt.Sprintf("[#39FF14]LATEST[-] [#D8FFD0]%s[-]\n[#4a7a4a]DO NOT UNPLUG  //  q / Ctrl-C to leave dashboard[-]", tview.Escape(logx.LatestLogLine())))
 }
 
 var (
-	paletteInk   = tcell.NewHexColor(0x171916)
-	paletteMint  = tcell.NewHexColor(0x58D6A7)
-	paletteSand  = tcell.NewHexColor(0xD8D1B2)
-	palettePaper = tcell.NewHexColor(0xF0EBD7)
-	paletteMuted = tcell.NewHexColor(0x788982)
-	paletteCoral = tcell.NewHexColor(0xF1785A)
+	paletteInk   = tcell.NewHexColor(0x0A0D0A)
+	paletteMint  = tcell.NewHexColor(0x39FF14)
+	paletteSand  = tcell.NewHexColor(0x7CFF6B)
+	palettePaper = tcell.NewHexColor(0xD8FFD0)
+	paletteMuted = tcell.NewHexColor(0x4A7A4A)
+	paletteCoral = tcell.NewHexColor(0xFF2E88)
 )
 
 // statusColor maps a row status to a tcell color, preserving the semantics of

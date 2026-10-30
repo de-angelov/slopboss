@@ -69,13 +69,13 @@ func TestBuildRowsShowsOwnedBlockedTaskInsteadOfIdle(t *testing.T) {
 
 func TestStatusColor(t *testing.T) {
 	cases := map[string]tcell.Color{
-		"running":       tcell.ColorGreen,
-		"completed":     tcell.ColorGreen,
-		"failed":        tcell.ColorRed,
-		"board error":   tcell.ColorRed,
-		"usage-limited": tcell.ColorFuchsia,
-		"In Progress":   tcell.ColorAqua,
-		"idle":          tcell.ColorGray,
+		"running":       paletteMint,
+		"completed":     paletteMint,
+		"failed":        paletteCoral,
+		"board error":   paletteCoral,
+		"usage-limited": tcell.NewHexColor(0xCE84B8),
+		"In Progress":   paletteMint,
+		"idle":          paletteMuted,
 	}
 	for status, want := range cases {
 		if got := statusColor(status); got != want {
