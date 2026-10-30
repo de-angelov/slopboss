@@ -85,6 +85,11 @@ func FirstBacklogTask(tasks []Task) Task {
 		if task.Section != "Backlog" || !(strings.EqualFold(task.Status, "Backlog") || task.Status == "") {
 			continue
 		}
+		// HITL is an approval state, not autonomous work. Its exact question
+		// belongs in Awaiting Human Input; an agent cannot make the decision.
+		if strings.EqualFold(task.Category, "HITL") {
+			continue
+		}
 		if !DependenciesSatisfied(task, done) {
 			continue
 		}

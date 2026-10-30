@@ -79,15 +79,15 @@ func TestFirstBacklogTaskPrefersAFKOverHITL(t *testing.T) {
 	}
 }
 
-func TestFirstBacklogTaskFallsBackToFirstWhenNoAFK(t *testing.T) {
+func TestFirstBacklogTaskLeavesHITLForHumanInput(t *testing.T) {
 	tasks := []Task{
 		{Section: "Backlog", Title: "Human Admin Task", Status: "Backlog", Category: "HITL"},
 		{Section: "Backlog", Title: "Another Human Task", Status: "Backlog", Category: "HITL"},
 	}
 
 	got := FirstBacklogTask(tasks)
-	if got.Title != "Human Admin Task" {
-		t.Fatalf("FirstBacklogTask = %q, want %q (first pending when no AFK exists)", got.Title, "Human Admin Task")
+	if got.Title != "" {
+		t.Fatalf("FirstBacklogTask = %q, want no autonomous HITL assignment", got.Title)
 	}
 }
 
@@ -98,8 +98,8 @@ func TestFirstBacklogTaskIgnoresActiveAndCompleted(t *testing.T) {
 	}
 
 	got := FirstBacklogTask(tasks)
-	if got.Title != "Pending HITL" {
-		t.Fatalf("FirstBacklogTask = %q, want %q (only Backlog-section pending tasks are eligible)", got.Title, "Pending HITL")
+	if got.Title != "" {
+		t.Fatalf("FirstBacklogTask = %q, want no autonomous HITL assignment", got.Title)
 	}
 }
 
