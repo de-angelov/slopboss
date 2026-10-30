@@ -24,14 +24,14 @@ Status: Backlog
 Keep this body exactly.
 `)
 
-	got, err := Set("TASK-1", Update{Owner: "Dev Agent 1", Status: "In Progress", Category: "AFK"})
+	got, err := Set("TASK-1", Update{File: "tasks", Section: "Dev Agent 1 In Progress", Owner: "Dev Agent 1", Status: "In Progress", Category: "AFK"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Owner != "Dev Agent 1" || got.Status != "In Progress" || got.Category != "AFK" {
 		t.Fatalf("updated task = %#v", got)
 	}
-	data, err := os.ReadFile(config.BacklogFile)
+	data, err := os.ReadFile(config.TasksFile)
 	if err != nil {
 		t.Fatal(err)
 	}

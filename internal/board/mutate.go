@@ -68,6 +68,16 @@ func Set(id string, update Update) (Task, error) {
 	if update.Section != "" && update.File == "" {
 		return Task{}, fmt.Errorf("--section requires --file so the destination is explicit")
 	}
+	if lifecycleChange(update) {
+		current, err := Get(id)
+		if err != nil {
+			return Task{}, err
+		}
+		candidate := applyUpdateToTask(current, update)
+		if _, err := ValidateLifecycle(candidate, boardFileName(targetPath)); err != nil {
+			return Task{}, err
+		}
+	}
 
 	block := applyMetadata(source.block, update)
 	if update.Section != "" {
@@ -90,6 +100,23 @@ func Set(id string, update Update) (Task, error) {
 		}
 	}
 	return Get(id)
+}
+
+func lifecycleChange(u Update) bool {
+	return u.Owner != "" || u.Status != "" || u.File != "" || u.Section != ""
+}
+
+func applyUpdateToTask(task Task, u Update) Task {
+	if u.Owner != "" {
+		task.Owner = u.Owner
+	}
+	if u.Status != "" {
+		task.Status = normalizeStatus(u.Status)
+	}
+	if u.Section != "" {
+		task.Section = u.Section
+	}
+	return task
 }
 
 type taskSource struct {
