@@ -159,10 +159,7 @@ type codexProvider struct{}
 func (codexProvider) Name() string { return "codex" }
 
 func (codexProvider) DefaultModel(role string) string {
-	if role == config.TeamLeadRole {
-		return "" // grooming uses codex's configured default
-	}
-	return config.DevAgentModel
+	return config.ProviderModel("codex", role)
 }
 
 func (codexProvider) NewMonitor() Monitor { return &codexOutputMonitor{} }
@@ -227,10 +224,7 @@ type claudeProvider struct{}
 func (claudeProvider) Name() string { return "claude" }
 
 func (claudeProvider) DefaultModel(role string) string {
-	if role == config.TeamLeadRole {
-		return "" // grooming uses the user's configured claude default
-	}
-	return config.ClaudeDevModel
+	return config.ProviderModel("claude", role)
 }
 
 func (claudeProvider) NewMonitor() Monitor { return &claudeOutputMonitor{} }
@@ -283,9 +277,7 @@ type opencodeProvider struct{}
 func (opencodeProvider) Name() string { return "opencode" }
 
 func (opencodeProvider) DefaultModel(role string) string {
-	// Defer to the user's configured OpenCode model (provider/model#variant).
-	_ = role
-	return ""
+	return config.ProviderModel("opencode", role)
 }
 
 func (opencodeProvider) NewMonitor() Monitor { return &opencodeOutputMonitor{} }
@@ -375,9 +367,7 @@ type agyProvider struct{}
 func (agyProvider) Name() string { return "agy" }
 
 func (agyProvider) DefaultModel(role string) string {
-	// Defer to the user's configured Antigravity model in settings.json.
-	_ = role
-	return ""
+	return config.ProviderModel("agy", role)
 }
 
 func (agyProvider) NewMonitor() Monitor { return &agyOutputMonitor{} }

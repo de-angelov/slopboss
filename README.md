@@ -200,7 +200,21 @@ coordination surface. `setup` scaffolds minimal starters you customize per proje
 | `DEV_AGENT.md` | Role instructions for Dev Agents. |
 | `TEAM_LEAD_AGENT.md` | Role instructions for the Team Lead. |
 | `TECH.md` | Project tech context shared with agents. |
-| `CONFIG.md` | slopboss's own configuration (product repo, base branch, backend, dev-agent count) as `- Key: Value` bullets — written by the setup wizard, read on startup, and used to pre-fill the wizard on re-run. |
+| `CONFIG.md` | slopboss's own configuration (product repo, base branch, backend, dev-agent count, and per-provider/per-role models) as `- Key: Value` bullets — written by the setup wizard, read on startup, and used to pre-fill the wizard on re-run. |
+
+### Provider models
+
+Set a board-wide default model with `- Codex model: ...` (or `Claude`,
+`OpenCode`, or `Agy`), or use role-specific keys when grooming and implementation
+need different models:
+
+```markdown
+- Codex dev-agent model: gpt-6.1-sol
+- Codex team-lead model: gpt-6.1-sol
+```
+
+Role-specific values take precedence over a provider-wide value. Leave a value
+empty to defer to that backend's normal default.
 
 A task is a small block of Markdown with a title, `Owner`, `Branch`, `Status`,
 and a free-form body describing the work — for example:

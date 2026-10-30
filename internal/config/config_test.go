@@ -21,10 +21,13 @@ func TestSettingsRoundTripInMarkdown(t *testing.T) {
 	}
 
 	if err := SaveSettings(Settings{
-		RepoURL:    "git@github.com:acme/app.git",
-		BaseBranch: "develop",
-		Provider:   "claude",
-		DevAgents:  3,
+		RepoURL:            "git@github.com:acme/app.git",
+		BaseBranch:         "develop",
+		Provider:           "claude",
+		DevAgents:          3,
+		CodexDevModel:      "gpt-6.1-sol",
+		CodexTeamLeadModel: "gpt-6.1-sol",
+		AgyDevModel:        "Gemini Flash",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +37,9 @@ func TestSettingsRoundTripInMarkdown(t *testing.T) {
 		"- Base branch: develop",
 		"- Provider: claude",
 		"- Dev agents: 3",
+		"- Codex dev-agent model: gpt-6.1-sol",
+		"- Codex team-lead model: gpt-6.1-sol",
+		"- Agy dev-agent model: Gemini Flash",
 	} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("CONFIG.md missing %q:\n%s", want, data)
@@ -58,6 +64,32 @@ func TestSettingsRoundTripInMarkdown(t *testing.T) {
 	}
 	if loadBaseBranch() != "main" || loadProvider() != DefaultProviderName || loadDevAgents() != DefaultDevAgents {
 		t.Fatalf("defaults not applied: branch=%q provider=%q agents=%d", loadBaseBranch(), loadProvider(), loadDevAgents())
+	}
+}
+
+func TestProviderModelReadsBoardRoleOverrideAndFallback(t *testing.T) {
+	oldRoot := RepoRoot
+	RepoRoot = t.TempDir()
+	t.Cleanup(func() { RepoRoot = oldRoot })
+
+	content := `- Codex model: generic-codex
+- Codex dev-agent model: dev-codex
+- Agy team-lead model: lead-agy
+`
+	if err := os.WriteFile(ConfigFilePath(), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ProviderModel("codex", DevAgent1Role); got != "dev-codex" {
+		t.Fatalf("codex dev model = %q, want role override", got)
+	}
+	if got := ProviderModel("codex", TeamLeadRole); got != "generic-codex" {
+		t.Fatalf("codex team lead model = %q, want provider fallback", got)
+	}
+	if got := ProviderModel("agy", TeamLeadRole); got != "lead-agy" {
+		t.Fatalf("agy team lead model = %q, want role override", got)
+	}
+	if got := ProviderModel("opencode", DevAgent1Role); got != "" {
+		t.Fatalf("opencode model = %q, want backend default", got)
 	}
 }
 

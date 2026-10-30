@@ -95,8 +95,8 @@ func TestProviderDefaultModels(t *testing.T) {
 }
 
 func TestDevAgentModelUsesBenchmarkWinner(t *testing.T) {
-	if config.DevAgentModel != "gpt-5.5" {
-		t.Fatalf("DevAgentModel = %q, want gpt-5.5", config.DevAgentModel)
+	if config.DevAgentModel != "gpt-6.1-sol" {
+		t.Fatalf("DevAgentModel = %q, want gpt-6.1-sol", config.DevAgentModel)
 	}
 }
 

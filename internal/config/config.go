@@ -32,7 +32,7 @@ const (
 	// DevAgentMaxTurns hard-caps the agentic turns of a dev-agent task
 	// session. Focused micro-tasks finish within 5-10 turns. Capping at 15
 	// prevents runaway loops from draining tokens when tests or environments fail.
-	DevAgentMaxTurns = 15
+	DevAgentMaxTurns        = 15
 	FailedSessionRetryDelay = time.Minute
 	MaxFailedSessionRetries = 3
 	UsageLimitCooldown      = 6 * time.Hour
@@ -48,7 +48,10 @@ const (
 	// before pulling the plug.
 	CancelGracePeriod = 30 * time.Second
 
-	DevAgentModel = "gpt-5.5"
+	// DevAgentModel remains the backwards-compatible fallback for Codex boards
+	// created before provider model settings existed. New boards persist this in
+	// CONFIG.md as "Codex dev-agent model" instead.
+	DevAgentModel = "gpt-6.1-sol"
 
 	// DefaultProviderName selects the agent backend; codex is the default and
 	// --provider switches it.
@@ -113,10 +116,18 @@ var (
 // its state in Markdown (never JSON), so it is stored in CONFIG.md as
 // "- Key: Value" bullets — the same convention as the board and experiment files.
 type Settings struct {
-	RepoURL    string
-	BaseBranch string
-	Provider   string
-	DevAgents  int
+	RepoURL               string
+	BaseBranch            string
+	Provider              string
+	DevAgents             int
+	CodexDevModel         string
+	CodexTeamLeadModel    string
+	ClaudeDevModel        string
+	ClaudeTeamLeadModel   string
+	OpenCodeDevModel      string
+	OpenCodeTeamLeadModel string
+	AgyDevModel           string
+	AgyTeamLeadModel      string
 }
 
 // ConfigFilePath is the on-disk location of the persisted Markdown config.
@@ -225,6 +236,35 @@ func loadDevAgents() int {
 	return DefaultDevAgents
 }
 
+// ProviderModel resolves a board-configured model for a provider and role.
+// Role-specific settings take precedence over a provider-wide model, so a board
+// can use a cheaper model for grooming while reserving a stronger one for dev
+// tasks. An empty configured value deliberately defers to the backend default.
+func ProviderModel(provider, role string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	roleName := "dev-agent"
+	if role == TeamLeadRole {
+		roleName = "team-lead"
+	}
+	if model := settingOr(provider+" "+roleName+" model", ""); model != "" {
+		return model
+	}
+	if model := settingOr(provider+" model", ""); model != "" {
+		return model
+	}
+	if roleName == "team-lead" {
+		return ""
+	}
+	switch provider {
+	case "codex":
+		return DevAgentModel
+	case "claude":
+		return ClaudeDevModel
+	default:
+		return ""
+	}
+}
+
 // mdSetting extracts a "- Key: Value" bullet (case-insensitive key) from Markdown
 // config content, ignoring prose and headings.
 func mdSetting(content, key string) string {
@@ -253,6 +293,12 @@ func SaveSettings(s Settings) error {
 	if s.DevAgents < 1 {
 		s.DevAgents = DefaultDevAgents
 	}
+	if strings.TrimSpace(s.CodexDevModel) == "" {
+		s.CodexDevModel = DevAgentModel
+	}
+	if strings.TrimSpace(s.ClaudeDevModel) == "" {
+		s.ClaudeDevModel = ClaudeDevModel
+	}
 	content := fmt.Sprintf(`# CONFIG
 
 slopboss configuration for this board. Edit the "- Key: Value" settings below;
@@ -262,7 +308,19 @@ slopboss reads them on startup. This is the single home for slopboss config.
 - Base branch: %s
 - Provider: %s
 - Dev agents: %d
-`, s.RepoURL, s.BaseBranch, s.Provider, s.DevAgents)
+- Codex dev-agent model: %s
+- Codex team-lead model: %s
+- Claude dev-agent model: %s
+- Claude team-lead model: %s
+- OpenCode dev-agent model: %s
+- OpenCode team-lead model: %s
+- Agy dev-agent model: %s
+- Agy team-lead model: %s
+`, s.RepoURL, s.BaseBranch, s.Provider, s.DevAgents,
+		s.CodexDevModel, s.CodexTeamLeadModel,
+		s.ClaudeDevModel, s.ClaudeTeamLeadModel,
+		s.OpenCodeDevModel, s.OpenCodeTeamLeadModel,
+		s.AgyDevModel, s.AgyTeamLeadModel)
 	if err := os.WriteFile(ConfigFilePath(), []byte(content), 0644); err != nil {
 		return err
 	}
