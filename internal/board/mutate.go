@@ -31,7 +31,7 @@ func CreateBacklogTask(task Task) (Task, error) {
 	if task.ID == "" || task.Title == "" || strings.TrimSpace(task.Body) == "" {
 		return Task{}, fmt.Errorf("task ID, title, and body are required")
 	}
-	if _, err := Get(task.ID); err == nil {
+	if _, _, err := findTaskSource(task.ID); err == nil {
 		return Task{}, fmt.Errorf("task %q already exists", task.ID)
 	}
 	if !strings.EqualFold(task.Category, "AFK") && !strings.EqualFold(task.Category, "HITL") {
@@ -43,6 +43,12 @@ func CreateBacklogTask(task Task) (Task, error) {
 	}
 	if strings.TrimSpace(task.Dependencies) == "" {
 		task.Dependencies = "none"
+	}
+	if err := validateTaskBody(task.Body); err != nil {
+		return Task{}, err
+	}
+	if err := validateDependencies(task.ID, task.Dependencies); err != nil {
+		return Task{}, err
 	}
 	block := fmt.Sprintf("### %s\n\nTask ID: %s\nCategory: %s\nOwner: Unassigned\nBranch: %s\nStatus: Backlog\nDependencies: %s\nBlocking tasks: none\n\n%s\n", task.Title, task.ID, strings.ToUpper(task.Category), task.Branch, task.Dependencies, strings.TrimSpace(task.Body))
 	data, err := os.ReadFile(config.BacklogFile)
@@ -57,6 +63,36 @@ func CreateBacklogTask(task Task) (Task, error) {
 		return Task{}, err
 	}
 	return Get(task.ID)
+}
+
+func validateTaskBody(body string) error {
+	required := []string{"Objective:", "Scope:", "Out of Scope:", "Acceptance Criteria:", "Verification:"}
+	for _, section := range required {
+		if !strings.Contains(body, section) {
+			return fmt.Errorf("task body is missing required section %q", section)
+		}
+	}
+	return nil
+}
+
+func validateDependencies(taskID, raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.EqualFold(raw, "none") {
+		return nil
+	}
+	for _, id := range strings.Split(raw, ",") {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return fmt.Errorf("dependency list contains an empty task ID")
+		}
+		if id == taskID {
+			return fmt.Errorf("task %q cannot depend on itself", taskID)
+		}
+		if _, _, err := findTaskSource(id); err != nil {
+			return fmt.Errorf("dependency %q does not exist on the board", id)
+		}
+	}
+	return nil
 }
 
 // Get returns the task with id from any board file. It deliberately reads the
@@ -122,10 +158,18 @@ func Set(id string, update Update) (Task, error) {
 				return Task{}, err
 			}
 		} else {
-			if err := writeAtomic(sourcePath, source.data[:source.start]+source.data[source.end:]); err != nil {
+			targetData, err := os.ReadFile(targetPath)
+			if err != nil {
 				return Task{}, err
 			}
-			if err := writeAtomic(targetPath, block); err != nil {
+			newTarget := moveTask(source.data, source.start, source.end, block, targetPath, update.Section)
+			// Commit destination first so interruption cannot lose the task. If
+			// removing the source fails, restore the original destination.
+			if err := writeAtomic(targetPath, newTarget); err != nil {
+				return Task{}, err
+			}
+			if err := writeAtomic(sourcePath, source.data[:source.start]+source.data[source.end:]); err != nil {
+				_ = writeAtomic(targetPath, string(targetData))
 				return Task{}, err
 			}
 		}
