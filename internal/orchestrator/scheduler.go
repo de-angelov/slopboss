@@ -330,7 +330,13 @@ func decompositionTask(blockedIDs []string) board.Task {
 // recordFailedSessionRetryLocked), so a retry deferred by an active pause or a
 // stale board entry is never charged. Callers must hold mu.
 func canRetryFailedSessionLocked(role string, session FinishedSession, now time.Time) (bool, int) {
-	if session.Outcome != sessionFailed {
+	// A decomposition pass can finish normally while leaving the same blocked
+	// set (for example, it creates an owning task but fails to link it). Retry
+	// that specific Team Lead work after the normal cooldown instead of treating
+	// a successful process exit as proof the blockers were reconciled.
+	retryableDecomposition := role == teamLeadRole && strings.HasPrefix(session.TaskKey, "decompose\x00") &&
+		(session.Outcome == sessionCompleted || session.Outcome == sessionFailed)
+	if session.Outcome != sessionFailed && !retryableDecomposition {
 		return false, 0
 	}
 	if now.Sub(session.FinishedAt) < config.FailedSessionRetryDelay {
