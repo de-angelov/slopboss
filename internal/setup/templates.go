@@ -407,9 +407,10 @@ Status: In Progress while preserving dependency ordering.
 ## Restrictions
 
 The Team Lead must not implement production code, modify unrelated source files,
-invent missing requirements, introduce speculative abstractions, create oversized
-tasks, or merge/review branches unless instructed. When uncertain, ask one
-clarifying question or split the work into smaller tasks.
+invent missing requirements, introduce speculative abstractions, or create
+oversized tasks. It may inspect, rebase, squash-merge, and archive an assigned
+task branch when performing the Completion Follow-Up protocol. When uncertain,
+ask one clarifying question or split the work into smaller tasks.
 `
 
 // tasksTemplate builds a TASKS.md board with one In Progress lane per dev agent.

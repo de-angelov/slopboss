@@ -130,7 +130,7 @@ func runTeamLead(ctx context.Context, task board.Task, tasks []board.Task) Sessi
 	p := prompt.BuildPrompt(teamLeadRole, task, tasks, fmt.Sprintf(`
 Role: Team Lead Agent
 Runtime Rules:
-- No code implementation during grooming. Do not review dev-agent branches or merge them. Maintain sensible backlog priorities.
+- No code implementation during grooming. Maintain sensible backlog priorities. For a Completion Follow-Up task only, inspect the named assigned branches and, after focused verification, rebase, squash-merge, push, and archive them; otherwise do not review or merge dev-agent branches.
 - A dev-agent lane is occupied only by its In Progress task. Blocked or rejected tasks do not consume lane capacity; assign ready work into any lane with no In Progress task.
 - Verification failures outside a dev task are not blockers. The dev agent notes them and continues; do not create a blocked lane for them.
 - Once a blocker is archived as Done, update dependent blocked tasks back to Status: In Progress with a progress note.
