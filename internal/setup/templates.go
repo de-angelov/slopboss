@@ -416,8 +416,10 @@ Before assigning, blocking, or unblocking work:
    blocker evidence, and task prose. Use: slopboss board set TASK-ID --file
    tasks --section "Blocked Tasks" --owner Unassigned --status Blocked. Then
    fill the freed lane with the highest-priority ready, non-overlapping task.
-4. If an active task is Blocked only because all dependencies are now Done, set
-   it to Status: In Progress and add a progress note.
+4. When every dependency of a blocked task is Done, move it from Blocked Tasks
+   into a free Dev Agent lane, set Owner to that agent and Status: In Progress,
+   then add a progress note. Do not merely change its status while it remains
+   unassigned.
 5. Keep no lane idle when a READY, non-overlapping task exists.
 
 Verification failures outside a dev task do not block that task. The dev agent
