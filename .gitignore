@@ -11,3 +11,4 @@ workspaces/
 
 # Editor / OS cruft
 .DS_Store
+*:Zone.Identifier
