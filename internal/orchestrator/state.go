@@ -35,6 +35,7 @@ var (
 	finished                 = map[string]FinishedSession{}
 	failedSessionRetryCounts = map[string]int{}
 	codexPausedUntil         time.Time
+	lastTeamLeadActivity     time.Time
 
 	// cancelPendingSince records when a running session first stopped matching
 	// the board (its task left its lane, or its key changed). Cancellation is

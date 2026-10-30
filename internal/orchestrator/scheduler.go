@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,10 @@ const teamLeadDecomposeSection = "Team Lead Decomposition"
 // session ends. It gives the Team Lead one bounded pass to close the loop before
 // more work is assigned.
 const teamLeadFollowUpSection = "Team Lead Completion Follow-Up"
+
+const teamLeadIdleAuditSection = "Team Lead Idle Audit"
+
+const teamLeadIdleAuditInterval = 30 * time.Minute
 
 // decomposeBody drives a decomposition grooming pass. Rather than idling when
 // every pending task is blocked, the loop launches this (throttled) so the team
@@ -40,6 +45,8 @@ For each task that cannot currently be assigned:
 Maintain a single "## Awaiting Human Input" section at the TOP of BACKLOG.md listing each isolated HITL ask as "<TASK-ID> — <exactly what you need from the human>"; remove entries once resolved.
 
 Keep edits minimal and correct, do NOT touch the Dev Agent lanes in TASKS.md. Stop only after every blocked task has an explicit owning task or a specific human ask.`
+
+const idleAuditBody = `This is a periodic, low-cost board-health review. Inspect the current board for stale blocker references, tasks stranded in invalid sections/statuses, unowned technical blockers, and ready tasks that are not scheduled. Correct board-only inconsistencies with the structural board commands and create a focused AFK task for any concrete technical issue without an owner. Do not modify product code, inspect unrelated branches, or invent work. If the board is healthy, make no changes and finish.`
 
 type desiredSession struct {
 	Task    board.Task
@@ -108,6 +115,31 @@ func reconcile(tasks []board.Task) {
 		if blocked := board.BlockedBacklogIDs(tasks, done); len(blocked) > 0 {
 			task := decompositionTask(blocked)
 			desired[teamLeadRole] = desiredSession{Task: task, TaskKey: task.Key}
+		}
+	}
+
+	// If all useful Team Lead work is exhausted, run a small periodic board
+	// health pass. Its time-bucketed key prevents the loop from launching it on
+	// every poll; session start time provides the 30-minute quiet interval.
+	if wanted, assigned := desired[teamLeadRole]; assigned && !needsFollowUp && backlogTask == nil && wanted.Task.Section == teamLeadDecomposeSection {
+		mu.Lock()
+		doneForNow := false
+		if session, ok := finished[teamLeadRole]; ok && session.TaskKey == wanted.TaskKey {
+			doneForNow = failedSessionRetryCounts[failedSessionRetryKey(teamLeadRole, wanted.TaskKey)] >= config.MaxFailedSessionRetries
+		}
+		auditDue := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= teamLeadIdleAuditInterval
+		mu.Unlock()
+		if doneForNow && auditDue {
+			delete(desired, teamLeadRole)
+		}
+	}
+	if _, assigned := desired[teamLeadRole]; !assigned && !needsFollowUp && backlogTask == nil {
+		mu.Lock()
+		due := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= teamLeadIdleAuditInterval
+		mu.Unlock()
+		if due {
+			audit := idleAuditTask(time.Now())
+			desired[teamLeadRole] = desiredSession{Task: audit, TaskKey: audit.Key}
 		}
 	}
 
@@ -207,6 +239,11 @@ func reconcile(tasks []board.Task) {
 		}
 
 		startSession(role, task, taskKey, tasks)
+		if role == teamLeadRole {
+			mu.Lock()
+			lastTeamLeadActivity = time.Now()
+			mu.Unlock()
+		}
 	}
 }
 
@@ -321,6 +358,17 @@ func decompositionTask(blockedIDs []string) board.Task {
 		Status:  "In Progress",
 		Body:    decomposeBody,
 		Key:     "decompose\x00" + strings.Join(blockedIDs, ","),
+	}
+}
+
+func idleAuditTask(now time.Time) board.Task {
+	window := now.Unix() / int64(teamLeadIdleAuditInterval.Seconds())
+	return board.Task{
+		Section: teamLeadIdleAuditSection,
+		Title:   "Periodic board health review",
+		Status:  "In Progress",
+		Body:    idleAuditBody,
+		Key:     "idle-audit\x00" + strconv.FormatInt(window, 10),
 	}
 }
 
