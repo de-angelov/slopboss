@@ -24,6 +24,8 @@ const teamLeadFollowUpSection = "Team Lead Completion Follow-Up"
 
 const teamLeadIdleAuditSection = "Team Lead Idle Audit"
 
+const teamLeadUnblockSection = "Team Lead Unblock"
+
 const teamLeadIdleAuditInterval = 30 * time.Minute
 
 // decomposeBody drives a decomposition grooming pass. Rather than idling when
@@ -49,6 +51,11 @@ Keep edits minimal and correct, do NOT touch the Dev Agent lanes in TASKS.md. St
 After creating owners, re-verify: re-read BACKLOG.md and TASKS.md and confirm each blocked task either (a) has a concrete owning AFK task whose ID appears in its dependencies/blocking tasks, or (b) a single specific ask in "## Awaiting Human Input". If any blocker is still unowned, create the missing task now rather than finishing. If a pass cannot resolve a blocker after this verification, leave a one-line note in the blocked task's progress notes explaining why, and escalate it in "## Awaiting Human Input" with the exact failing command and the smallest human action needed.`
 
 const idleAuditBody = `This is a periodic, low-cost board-health review. Inspect the current board for stale blocker references, tasks stranded in invalid sections/statuses, unowned technical blockers, and ready tasks that are not scheduled. Correct board-only inconsistencies with the structural board commands and create a focused AFK task for any concrete technical issue without an owner. Do not modify product code, inspect unrelated branches, or invent work. If the board is healthy, make no changes and finish.`
+
+// unblockBody drives an unblock pass: a blocked task whose dependencies are now
+// satisfied must be moved back into a free Dev Agent lane instead of staying
+// stranded in Blocked Tasks.
+const unblockBody = `A previously blocked task is now dependency-ready. Move it out of the "Blocked Tasks" section into a free "Dev Agent N In Progress" lane, set Owner to that agent and Status to In Progress, and add a progress note recording which dependency landed. Do not merely change its status while it remains unassigned. If no lane is free, leave it in Blocked Tasks and re-check next poll.`
 
 type desiredSession struct {
 	Task    board.Task
@@ -83,11 +90,19 @@ func reconcile(tasks []board.Task) {
 		}
 	}
 
-	// Point the team lead at the highest-priority pending backlog task. AFK work
-	// is preferred over HITL so idle dev lanes get fed before the pipeline stalls
-	// on a human (see board.FirstBacklogTask). Only dependency-ready tasks are
-	// returned.
-	if bt := board.FirstBacklogTask(tasks); bt.Title != "" {
+	// Prefer unblocking a ready blocked task over grooming new work: unblocking
+	// unlocks downstream work and recovers stalled lanes. Only fall back to the
+	// backlog when nothing is ready to unblock.
+	if ub := board.UnblockedBlockedTask(tasks); ub.Title != "" {
+		ut := board.Task{
+			Section: teamLeadUnblockSection,
+			Title:   "Unblock: " + ub.Title,
+			Status:  "In Progress",
+			Body:    unblockBody + "\n\nTarget task: " + ub.ID + " (" + ub.Title + ")",
+			Key:     "unblock\x00" + ub.Key,
+		}
+		backlogTask = &ut
+	} else if bt := board.FirstBacklogTask(tasks); bt.Title != "" {
 		backlogTask = &bt
 	}
 
@@ -123,13 +138,14 @@ func reconcile(tasks []board.Task) {
 	// If all useful Team Lead work is exhausted, run a small periodic board
 	// health pass. Its time-bucketed key prevents the loop from launching it on
 	// every poll; session start time provides the 30-minute quiet interval.
-	if wanted, assigned := desired[teamLeadRole]; assigned && !needsFollowUp && backlogTask == nil && wanted.Task.Section == teamLeadDecomposeSection {
+	if wanted, assigned := desired[teamLeadRole]; assigned && !needsFollowUp && backlogTask == nil &&
+		(wanted.Task.Section == teamLeadDecomposeSection || wanted.Task.Section == teamLeadUnblockSection) {
 		mu.Lock()
 		doneForNow := false
 		if session, ok := finished[teamLeadRole]; ok && session.TaskKey == wanted.TaskKey {
 			doneForNow = failedSessionRetryCounts[failedSessionRetryKey(teamLeadRole, wanted.TaskKey)] >= config.MaxFailedSessionRetries
 			if doneForNow {
-				logx.Event("decomposition retries exhausted for blocked set %v; escalating to idle audit", wanted.TaskKey)
+				logx.Event("%s retries exhausted for %v; escalating to idle audit", wanted.Task.Section, wanted.TaskKey)
 			}
 		}
 		auditDue := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= teamLeadIdleAuditInterval
@@ -389,7 +405,9 @@ func canRetryFailedSessionLocked(role string, session FinishedSession, now time.
 	// a successful process exit as proof the blockers were reconciled.
 	retryableDecomposition := role == teamLeadRole && strings.HasPrefix(session.TaskKey, "decompose\x00") &&
 		(session.Outcome == sessionCompleted || session.Outcome == sessionFailed)
-	if session.Outcome != sessionFailed && !retryableDecomposition {
+	retryableUnblock := role == teamLeadRole && strings.HasPrefix(session.TaskKey, "unblock\x00") &&
+		(session.Outcome == sessionCompleted || session.Outcome == sessionFailed)
+	if session.Outcome != sessionFailed && !retryableDecomposition && !retryableUnblock {
 		return false, 0
 	}
 	if now.Sub(session.FinishedAt) < config.FailedSessionRetryDelay {

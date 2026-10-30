@@ -215,3 +215,25 @@ func DependenciesSatisfied(task Task, done map[string]bool) bool {
 	}
 	return true
 }
+
+// UnblockedBlockedTask returns the first task currently sitting in the shared
+// "Blocked Tasks" section whose dependencies are all completed. Such a task is
+// ready to be moved back into a free Dev Agent lane; surfacing it lets the
+// reconcile loop hand the Team Lead an explicit unblock pass instead of waiting
+// for a grooming slot. Returns the zero Task when none qualify.
+func UnblockedBlockedTask(tasks []Task) Task {
+	done := CompletedSet()
+	for _, task := range tasks {
+		if task.Section != "Blocked Tasks" {
+			continue
+		}
+		if !strings.EqualFold(task.Status, "Blocked") {
+			continue
+		}
+		if !DependenciesSatisfied(task, done) {
+			continue
+		}
+		return task
+	}
+	return Task{}
+}
