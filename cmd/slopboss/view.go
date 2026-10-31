@@ -29,7 +29,7 @@ var viewCmd = &cobra.Command{
 		attach.Stdout = os.Stdout
 		attach.Stderr = os.Stderr
 		if err := attach.Run(); err != nil {
-			return fmt.Errorf("attach to dashboard session %q: %w (start it with 'slopboss run' in tmux, or pass --session)", session, err)
+			return fmt.Errorf("attach to dashboard session %q: %w (start or recreate it with 'slopboss run'; use 'slopboss run --detach' to start it without attaching)", session, err)
 		}
 		return nil
 	},
