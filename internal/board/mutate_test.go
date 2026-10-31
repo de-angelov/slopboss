@@ -169,6 +169,37 @@ func TestValidateWholeDocumentAllowsEmptyBoardsAndRejectsMalformedTasks(t *testi
 	}
 }
 
+func TestNormalizeTasksRepairsRepeatedDocumentWithoutLosingRecords(t *testing.T) {
+	dir := t.TempDir()
+	withBoardFiles(t, dir)
+	first := "### Live task\nTask ID: TASK-live\nCategory: AFK\nOwner: Dev Agent 1\nBranch: agent/1/live\nStatus: In Progress\nDependencies: none\nBlocking tasks: none\n\nLive body.\n"
+	other := "### Other task\nTask ID: TASK-other\nCategory: AFK\nOwner: Dev Agent 2\nBranch: agent/2/other\nStatus: In Progress\nDependencies: none\nBlocking tasks: none\n\nOther body.\n"
+	malformed := "# TASKS\n\n## Dev Agent 1 In Progress\n\n" + first + "\n# TASKS\n\n## Dev Agent 1 In Progress\n\n" + first + "\n## Dev Agent 2 In Progress\n\n" + other + "\n# TASKS\n\n## Dev Agent 2 In Progress\n"
+	writeBoard(t, config.TasksFile, malformed)
+	if err := NormalizeTasks(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(config.TasksFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if strings.Count(text, "# TASKS") != 1 || strings.Count(text, "## Dev Agent 1 In Progress") != 1 || strings.Count(text, "## Dev Agent 2 In Progress") != 1 {
+		t.Fatalf("document headings were not normalized:\n%s", text)
+	}
+	for _, want := range []string{"TASK-live", "Live body.", "TASK-other", "Other body."} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("normalized document lost %q:\n%s", want, text)
+		}
+	}
+	if strings.Count(text, "Task ID: TASK-live") != 1 || strings.Count(text, "Task ID: TASK-other") != 1 {
+		t.Fatalf("normalized records are duplicated:\n%s", text)
+	}
+	if err := validateWholeDocument(text, "tasks"); err != nil {
+		t.Fatalf("normalized document invalid: %v", err)
+	}
+}
+
 func withBoardFiles(t *testing.T, root string) {
 	t.Helper()
 	oldRoot := config.RepoRoot

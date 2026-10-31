@@ -36,6 +36,17 @@ var boardGetCmd = &cobra.Command{
 	},
 }
 
+var boardNormalizeTasksCmd = &cobra.Command{
+	Use:   "normalize-tasks",
+	Short: "Repair repeated headings and identical records in TASKS.md",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := board.NormalizeTasks(); err != nil {
+			return err
+		}
+		return writeJSON(map[string]string{"result": "TASKS.md normalized"})
+	},
+}
+
 var (
 	createID, createTitle, createCategory, createBranch, createDependencies, createBody string
 )
@@ -108,6 +119,6 @@ func init() {
 	boardCreateCmd.Flags().StringVar(&createBranch, "branch", "none", "proposed task branch")
 	boardCreateCmd.Flags().StringVar(&createDependencies, "dependencies", "none", "dependency task IDs")
 	boardCreateCmd.Flags().StringVar(&createBody, "body", "", "task body with Objective, Scope, Out of Scope, Acceptance Criteria, Verification")
-	boardCmd.AddCommand(boardGetCmd, boardSetCmd, boardCreateCmd)
+	boardCmd.AddCommand(boardGetCmd, boardSetCmd, boardCreateCmd, boardNormalizeTasksCmd)
 	rootCmd.AddCommand(boardCmd)
 }

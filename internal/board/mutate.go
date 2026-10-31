@@ -118,6 +118,108 @@ func Get(id string) (Task, error) {
 	return Task{}, fmt.Errorf("task %q not found", id)
 }
 
+// NormalizeTasks removes repeated document/section headings and duplicate
+// task records with matching bodies from TASKS.md. It is an explicit recovery
+// path for concatenated board snapshots; conflicting task bodies are rejected.
+func NormalizeTasks() error {
+	data, err := os.ReadFile(config.TasksFile)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	seenHeadings := map[string]bool{}
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		h := strings.TrimSpace(line)
+		if strings.HasPrefix(h, "# ") || (strings.HasPrefix(h, "## ") && !strings.HasPrefix(h, "### ")) {
+			if seenHeadings[h] {
+				continue
+			}
+			seenHeadings[h] = true
+		}
+		kept = append(kept, line)
+	}
+	content := strings.Join(kept, "\n")
+	spans := taskBlocks(content)
+	lastTask := map[string]int{}
+	bestRank := map[string]int{}
+	for i, span := range spans {
+		id := metadataValue(span.text, "task id")
+		rank := 0
+		if metadataValue(span.text, "owner") != "Unassigned" {
+			rank += 1
+		}
+		if normalizeStatus(metadataValue(span.text, "status")) == "In Progress" {
+			rank += 2
+		}
+		if old, ok := bestRank[id]; !ok || rank >= old {
+			bestRank[id], lastTask[id] = rank, i
+		}
+	}
+	firstByID := map[string]string{}
+	var out strings.Builder
+	cursor := 0
+	for i, span := range spans {
+		out.WriteString(content[cursor:span.start])
+		id := metadataValue(span.text, "task id")
+		if prior, exists := firstByID[id]; exists {
+			if taskBody(prior) != taskBody(span.text) {
+				return fmt.Errorf("cannot normalize conflicting task bodies for %q", id)
+			}
+		} else {
+			firstByID[id] = span.text
+		}
+		// When repeated snapshots contain the same task body with different
+		// metadata, prefer an assigned In Progress record, then the later record.
+		if lastTask[id] == i {
+			out.WriteString(cleanRepeatedBoardBoilerplate(span.text))
+		}
+		cursor = span.end
+	}
+	out.WriteString(content[cursor:])
+	candidate := out.String()
+	if err := validateWholeDocument(candidate, "tasks"); err != nil {
+		return err
+	}
+	return writeAtomic(config.TasksFile, candidate)
+}
+
+func cleanRepeatedBoardBoilerplate(block string) string {
+	lines := strings.Split(block, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "Active work board. Keep at most one task In Progress per dev-agent lane." {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+func taskBody(block string) string {
+	lines := strings.Split(block, "\n")
+	var body []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") || trimmed == "Active work board. Keep at most one task In Progress per dev-agent lane." {
+			continue
+		}
+		body = append(body, line)
+	}
+	lines = body
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "Objective:") {
+			return strings.TrimSpace(strings.Join(lines[i:], "\n"))
+		}
+	}
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" && i+1 < len(lines) {
+			return strings.TrimSpace(strings.Join(lines[i+1:], "\n"))
+		}
+	}
+	return ""
+}
+
 // Set applies a validated structural update. Moving a task requires both File
 // and Section so an accidental status edit can never relocate work.
 func Set(id string, update Update) (Task, error) {
