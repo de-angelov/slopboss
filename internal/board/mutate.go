@@ -169,13 +169,16 @@ func setTask(id string, update Update) (Task, error) {
 		if _, err := ValidateLifecycle(candidate, boardFileName(targetPath)); err != nil {
 			return Task{}, err
 		}
+		if err := validateActiveLaneAvailable(candidate, id); err != nil {
+			return Task{}, err
+		}
 	}
 
 	block := applyMetadata(source.block, update)
 	if update.Section != "" {
-		block = moveTask(source.data, source.start, source.end, block, targetPath, update.Section)
 		if sourcePath == targetPath {
-			if err := writeAtomic(sourcePath, block); err != nil {
+			updatedBoard := moveTask(source.data, source.start, source.end, block, targetPath, update.Section)
+			if err := writeAtomic(sourcePath, updatedBoard); err != nil {
 				return Task{}, err
 			}
 		} else {
@@ -200,6 +203,32 @@ func setTask(id string, update Update) (Task, error) {
 		}
 	}
 	return Get(id)
+}
+
+// validateActiveLaneAvailable prevents the Go board writer from assigning a
+// second In Progress task to a dev-agent lane. The lock held by Set makes this
+// check and the subsequent write one serialized transaction across processes.
+func validateActiveLaneAvailable(candidate Task, currentID string) error {
+	if candidate.Status != "In Progress" {
+		return nil
+	}
+	role, ok := config.DevAgentRoleForActiveSection(candidate.Section)
+	if !ok {
+		return nil // ValidateLifecycle reports malformed active lanes separately.
+	}
+	data, err := os.ReadFile(config.TasksFile)
+	if err != nil {
+		return err
+	}
+	for id, existing := range parseAllTasks(string(data), config.TasksFile) {
+		if id == currentID || existing.Status != "In Progress" {
+			continue
+		}
+		if existing.Section == candidate.Section || existing.Owner == role {
+			return fmt.Errorf("%s already has In Progress task %s; finish or move it before assigning %s", role, id, currentID)
+		}
+	}
+	return nil
 }
 
 func lifecycleChange(u Update) bool {
