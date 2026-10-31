@@ -124,6 +124,12 @@ func ReadTasks(path string) ([]Task, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParseTasks(data), nil
+}
+
+// ParseTasks parses task entries from Markdown contents. It lets read-only
+// tools validate injected filesystem contents without using the board cache.
+func ParseTasks(data string) []Task {
 
 	lines := strings.Split(data, "\n")
 
@@ -203,7 +209,7 @@ func ReadTasks(path string) ([]Task, error) {
 	}
 
 	flush()
-	return tasks, nil
+	return tasks
 }
 
 // EmptyAs returns value, or fallback when value is blank. A small shared helper
