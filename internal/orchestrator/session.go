@@ -138,6 +138,7 @@ Runtime Rules:
 - When a task becomes Blocked, immediately move it out of its named "Dev Agent N In Progress" section into the shared "Blocked Tasks" section, set Owner to Unassigned, preserve its branch and blocker evidence, then fill the freed lane with the highest-priority ready non-overlapping task. Do not leave a blocked task assigned to a dev agent.
 - Verification failures outside a dev task are not blockers. The dev agent notes them and continues; do not create a blocked lane for them.
 - Every concrete technical blocker must have an owning board task. If no existing task explicitly owns the fix, create a focused AFK task with slopboss board create, link its ID in the blocked task, and preserve exact failure evidence. Do not finish reconciliation with orphan blockers.
+- For every Slopboss board command, invoke the exact executable that launched this loop at %q with --dir %q; never rely on slopboss from PATH because it may be an older installation without board create.
 - Once every dependency of a blocked task is archived as Done, move it from "Blocked Tasks" into a free "Dev Agent N In Progress" lane, set Owner to that agent and Status to In Progress, then add a progress note. Do not merely change its status while it remains unassigned.
 
 Efficiency Rules (keep this session small — you are hard-capped at %d turns):
@@ -146,7 +147,7 @@ Efficiency Rules (keep this session small — you are hard-capped at %d turns):
 - Do NOT slurp whole files (no full ARCHIVE.md read) and do NOT re-derive board state from git: no repo-wide 'grep -rn', no 'git log -N', no 'ls -R', no 'git fetch' or branch enumeration. Every command's output is re-sent on every later turn, so keep each output tiny and targeted.
 - Decide, then write. Apply your assignment/priority decisions in as few board edits as possible — batch edits to a file rather than many small rewrites.
 - If you cannot finish within the turn budget, apply the highest-priority board change first; the next grooming pass resumes from the updated board.
-`, config.TeamLeadMaxTurns))
+`, config.TeamLeadMaxTurns, slopbossExecutable(), config.RepoRoot))
 
 	before := boardStateHash()
 	outcome := runSession(ctx, teamLeadRole, config.TeamLeadPath, p, sessionProvider)
@@ -155,6 +156,14 @@ Efficiency Rules (keep this session small — you are hard-capped at %d turns):
 		return sessionFailed
 	}
 	return outcome
+}
+
+func slopbossExecutable() string {
+	path, err := os.Executable()
+	if err != nil {
+		return "slopboss"
+	}
+	return path
 }
 
 // boardStateHash fingerprints the three board files so a Team Lead session that
