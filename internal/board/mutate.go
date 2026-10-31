@@ -19,6 +19,7 @@ type Update struct {
 	Category       string
 	Dependencies   string
 	BlockedBy      string
+	Note           string
 	ClearBlockedBy bool
 	File           string
 	Section        string
@@ -26,6 +27,16 @@ type Update struct {
 
 // CreateBacklogTask adds a fully specified, unassigned task to Backlog.
 func CreateBacklogTask(task Task) (Task, error) {
+	var created Task
+	err := withBoardLock(func() error {
+		var err error
+		created, err = createBacklogTask(task)
+		return err
+	})
+	return created, err
+}
+
+func createBacklogTask(task Task) (Task, error) {
 	task.ID = strings.TrimSpace(task.ID)
 	task.Title = strings.TrimSpace(task.Title)
 	if task.ID == "" || task.Title == "" || strings.TrimSpace(task.Body) == "" {
@@ -117,6 +128,16 @@ func Get(id string) (Task, error) {
 // Set applies a validated structural update. Moving a task requires both File
 // and Section so an accidental status edit can never relocate work.
 func Set(id string, update Update) (Task, error) {
+	var updated Task
+	err := withBoardLock(func() error {
+		var err error
+		updated, err = setTask(id, update)
+		return err
+	})
+	return updated, err
+}
+
+func setTask(id string, update Update) (Task, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Task{}, fmt.Errorf("task ID is required")
@@ -340,7 +361,11 @@ func applyMetadata(block string, u Update) string {
 	if len(add) > 0 {
 		lines = append(lines[:1], append(add, lines[1:]...)...)
 	}
-	return strings.Join(lines, "\n")
+	updated := strings.Join(lines, "\n")
+	if note := strings.TrimSpace(u.Note); note != "" {
+		updated = strings.TrimRight(updated, "\n") + "\n\n" + note + "\n"
+	}
+	return updated
 }
 
 func canonicalMetadataKey(key string) string {

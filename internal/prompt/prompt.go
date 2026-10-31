@@ -49,6 +49,7 @@ Runtime Rules:
 - File reading discipline: avoid reading entire large files (>300 lines) with unbounded reads. Locate target functions first (e.g. with grep -n) and read targeted line ranges.
 - Verification failures outside the assigned task are not blockers. Do not fix unrelated files and do not change the assigned task to Blocked; note the failing command and path in the task's progress notes, then finish when your targeted tests and build pass.
 - Blocked status is reserved for genuine human input (credentials, access, or a decision) or a dependency install that prevents all work. When blocked, record Blocked by: and a specific ask.
+- Never edit BACKLOG.md, TASKS.md, or ARCHIVE.md directly. Use the serialized Slopboss board CLI for lifecycle changes and board set TASK-ID --note for progress or blocker evidence.
 ` + DependencyInstallRules + "\n" + TestingDisciplineRules + "\n" + RebaseAuditRules + "\n"
 }
 

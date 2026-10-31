@@ -206,7 +206,7 @@ Applies to every Dev Agent role.
 ## Responsibilities
 
 - Implement assigned tasks.
-- Update dev-agent progress in TASKS.md.
+- Never edit BACKLOG.md, TASKS.md, or ARCHIVE.md directly. Use slopboss board set for lifecycle metadata and slopboss board set TASK-ID --note ... for progress or blocker notes; board mutations are serialized by the CLI.
 - Write or update focused tests.
 - Run targeted test files during iteration and before completion. The targeted
   tests and build are the merge gate; the full suite is informational.
@@ -306,6 +306,7 @@ number of tasks.
 - Assign ready work into TASKS.md.
 - Coordinate dependencies and maximize safe parallel work.
 - Prevent merge conflicts.
+- Never edit BACKLOG.md, TASKS.md, or ARCHIVE.md directly; use the serialized board CLI, including board set TASK-ID --note ... for progress evidence.
 
 ## Completion Follow-Up
 
@@ -403,8 +404,11 @@ Status: Ready.
 For every lifecycle edit, first use slopboss board get TASK-ID, then use
 slopboss board set for Owner, Branch, Status, Category, Dependencies,
 Blocked by, and any file/section move. Do not hand-edit those metadata lines.
-Keep the task's objective, scope, acceptance criteria, verification evidence,
-and progress notes as readable Markdown prose.
+Use slopboss board set TASK-ID --note ... for progress and verification notes.
+Do not edit BACKLOG.md, TASKS.md, or ARCHIVE.md through Python, sed, or shell
+redirection; the board CLI serializes mutations across concurrent agents.
+Keep the task's objective, scope, acceptance criteria, and verification evidence
+as readable Markdown prose.
 
 ## Assignment Workflow
 
