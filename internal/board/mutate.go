@@ -59,7 +59,11 @@ func CreateBacklogTask(task Task) (Task, error) {
 	if !strings.Contains(content, "## Backlog") {
 		return Task{}, fmt.Errorf("BACKLOG.md has no ## Backlog section")
 	}
-	if err := writeAtomic(config.BacklogFile, strings.TrimRight(content, "\n")+"\n\n"+block); err != nil {
+	candidate := strings.TrimRight(content, "\n") + "\n\n" + block
+	if err := validateWholeDocument(candidate, boardFileName(config.BacklogFile)); err != nil {
+		return Task{}, err
+	}
+	if err := writeAtomic(config.BacklogFile, candidate); err != nil {
 		return Task{}, err
 	}
 	return Get(task.ID)
@@ -152,9 +156,12 @@ func Set(id string, update Update) (Task, error) {
 
 	block := applyMetadata(source.block, update)
 	if update.Section != "" {
-		block = moveTask(source.data, source.start, source.end, block, targetPath, update.Section)
 		if sourcePath == targetPath {
-			if err := writeAtomic(sourcePath, block); err != nil {
+			candidate := moveWithinDocument(source.data, source.start, source.end, block, update.Section)
+			if err := validateWholeDocument(candidate, boardFileName(sourcePath)); err != nil {
+				return Task{}, err
+			}
+			if err := writeAtomic(sourcePath, candidate); err != nil {
 				return Task{}, err
 			}
 		} else {
@@ -162,19 +169,30 @@ func Set(id string, update Update) (Task, error) {
 			if err != nil {
 				return Task{}, err
 			}
-			newTarget := moveTask(source.data, source.start, source.end, block, targetPath, update.Section)
+			sourceCandidate := source.data[:source.start] + source.data[source.end:]
+			newTarget := insertTask(string(targetData), block, update.Section)
+			if err := validateWholeDocument(sourceCandidate, boardFileName(sourcePath)); err != nil {
+				return Task{}, err
+			}
+			if err := validateWholeDocument(newTarget, boardFileName(targetPath)); err != nil {
+				return Task{}, err
+			}
 			// Commit destination first so interruption cannot lose the task. If
 			// removing the source fails, restore the original destination.
 			if err := writeAtomic(targetPath, newTarget); err != nil {
 				return Task{}, err
 			}
-			if err := writeAtomic(sourcePath, source.data[:source.start]+source.data[source.end:]); err != nil {
+			if err := writeAtomic(sourcePath, sourceCandidate); err != nil {
 				_ = writeAtomic(targetPath, string(targetData))
 				return Task{}, err
 			}
 		}
 	} else {
-		if err := writeAtomic(sourcePath, source.data[:source.start]+block+source.data[source.end:]); err != nil {
+		candidate := source.data[:source.start] + block + source.data[source.end:]
+		if err := validateWholeDocument(candidate, boardFileName(sourcePath)); err != nil {
+			return Task{}, err
+		}
+		if err := writeAtomic(sourcePath, candidate); err != nil {
 			return Task{}, err
 		}
 	}
@@ -354,22 +372,81 @@ func canonicalMetadataKey(key string) string {
 	}
 }
 
-func moveTask(source string, start, end int, block, targetPath, section string) string {
+func moveWithinDocument(source string, start, end int, block, section string) string {
 	remaining := source[:start] + source[end:]
-	if targetPath == "" {
-		return remaining
-	}
-	data, _ := os.ReadFile(targetPath)
-	target := string(data)
-	if target == source {
-		target = remaining
-	}
+	return insertTask(remaining, block, section)
+}
+
+func insertTask(target, block, section string) string {
 	heading := "## " + section
 	if idx := strings.Index(target, heading+"\n"); idx >= 0 {
 		insert := idx + len(heading) + 1
 		return target[:insert] + "\n" + strings.TrimSpace(block) + "\n" + target[insert:]
 	}
 	return strings.TrimRight(target, "\n") + "\n\n" + heading + "\n\n" + strings.TrimSpace(block) + "\n"
+}
+
+func validateWholeDocument(data, file string) error {
+	top := 0
+	sections := map[string]bool{}
+	for _, line := range strings.Split(data, "\n") {
+		h := strings.TrimSpace(line)
+		if strings.HasPrefix(h, "# ") {
+			top++
+		}
+		if strings.HasPrefix(h, "## ") && !strings.HasPrefix(h, "### ") {
+			section := strings.TrimSpace(strings.TrimPrefix(h, "## "))
+			if sections[section] {
+				return fmt.Errorf("duplicate section heading %q", section)
+			}
+			sections[section] = true
+		}
+	}
+	if top != 1 {
+		return fmt.Errorf("board document must contain exactly one top-level heading (found %d)", top)
+	}
+	seen := map[string]bool{}
+	for _, span := range taskBlocks(data) {
+		task, ok := parseTaskBlock(data, span)
+		if !ok || task.ID == "" || task.Title == "" || task.Section == "" || task.Status == "" || task.Owner == "" {
+			return fmt.Errorf("unparseable task block %q", strings.TrimSpace(span.text[:strings.Index(span.text+"\n", "\n")]))
+		}
+		if seen[task.ID] {
+			return fmt.Errorf("duplicate task ID %q", task.ID)
+		}
+		seen[task.ID] = true
+		if _, err := ValidateLifecycle(task, file); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func parseTaskBlock(data string, span blockSpan) (Task, bool) {
+	titleLine := strings.TrimSpace(strings.Split(span.text, "\n")[0])
+	if !strings.HasPrefix(titleLine, "### ") {
+		return Task{}, false
+	}
+	task := Task{Title: strings.TrimSpace(strings.TrimPrefix(titleLine, "### "))}
+	for _, line := range strings.Split(data[:span.start], "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") && !strings.HasPrefix(trimmed, "### ") {
+			task.Section = strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
+		}
+	}
+	for _, line := range strings.Split(span.text, "\n") {
+		if key, value, ok := parseMetadataLine(line); ok {
+			switch key {
+			case "task id":
+				task.ID = value
+			case "owner":
+				task.Owner = value
+			case "status":
+				task.Status = normalizeStatus(value)
+			}
+		}
+	}
+	return task, true
 }
 
 func writeAtomic(path, data string) error {
