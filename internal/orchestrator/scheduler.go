@@ -1,6 +1,11 @@
 package orchestrator
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +16,80 @@ import (
 	"github.com/de-angelov/slopboss/internal/git"
 	"github.com/de-angelov/slopboss/internal/logx"
 )
+
+func loadControllerState() (ControllerState, error) {
+	state, err := controllerStateStore.Load()
+	if errors.Is(err, os.ErrNotExist) {
+		state = ControllerState{Version: ControllerStateVersion}
+		return state, nil
+	}
+	return state, err
+}
+
+func commitControllerState(state ControllerState) error { return controllerStateStore.Commit(state) }
+
+func controllerTaskID(task board.Task, key string) string {
+	if task.ID != "" {
+		return task.ID
+	}
+	return key
+}
+func controllerBranch(task board.Task, role string) string {
+	if task.Branch != "" {
+		return task.Branch
+	}
+	return "synthetic/" + strings.NewReplacer(" ", "-", "\\", "-").Replace(role)
+}
+func controllerLeaseID(role string, task board.Task, key string) string {
+	sum := sha256.Sum256([]byte(role + "\x00" + controllerTaskID(task, key) + "\x00" + key))
+	return hex.EncodeToString(sum[:])
+}
+func findControllerLease(state ControllerState, role string) (ControllerWorkerLease, bool) {
+	for _, lease := range state.Leases {
+		if lease.Intent.Role == role {
+			return lease, true
+		}
+	}
+	return ControllerWorkerLease{}, false
+}
+
+// reconcileLeaseDecision is the durable-state gate used by reconcile before it
+// considers any process-local maps or launches. A recorded lease for the same
+// intent is authoritative across restart; a nonterminal prior lease for the
+// role is runtime evidence and also suppresses a second worker.
+func reconcileLeaseDecision(state ControllerState, role, leaseID string) (ControllerWorkerLease, bool) {
+	lease, found := findControllerLease(state, role)
+	if !found {
+		return ControllerWorkerLease{}, true
+	}
+	if lease.LeaseID == leaseID || lease.Terminal == nil {
+		return lease, false
+	}
+	return lease, true
+}
+func replaceControllerLease(leases []ControllerWorkerLease, lease ControllerWorkerLease) []ControllerWorkerLease {
+	for i := range leases {
+		if leases[i].Intent.Role == lease.Intent.Role {
+			leases[i] = lease
+			return leases
+		}
+	}
+	return append(leases, lease)
+}
+func restoreTerminalLease(lease ControllerWorkerLease, task board.Task, taskKey string) {
+	if lease.Terminal == nil {
+		return
+	}
+	outcome := SessionOutcome(lease.Terminal.Outcome)
+	mu.Lock()
+	if existing, exists := finished[lease.Intent.Role]; !exists || existing.TaskKey != taskKey {
+		finished[lease.Intent.Role] = FinishedSession{Role: lease.Intent.Role, Task: task.Title, TaskKey: taskKey, Branch: lease.Intent.Branch, Outcome: outcome, FinishedAt: lease.Terminal.FinishedAt}
+	}
+	mu.Unlock()
+}
+func terminalEvidence(outcome SessionOutcome, role, taskKey string) string {
+	return fmt.Sprintf("session outcome=%s role=%q task=%q", outcome, role, taskKey)
+}
 
 // teamLeadDecomposeSection tags the synthetic task the orchestrator hands the
 // team lead when there is no dependency-ready work but blocked tasks remain: a
@@ -63,6 +142,11 @@ type desiredSession struct {
 }
 
 func reconcile(tasks []board.Task) {
+	durable, err := loadControllerState()
+	if err != nil {
+		logx.Event("cannot load controller state; refusing launches: %v", err)
+		return
+	}
 	done := board.CompletedSet()
 	desired := map[string]desiredSession{}
 	invalidRoles := map[string]bool{}
@@ -209,6 +293,14 @@ func reconcile(tasks []board.Task) {
 	for role, desiredSession := range desired {
 		task := desiredSession.Task
 		taskKey := desiredSession.TaskKey
+		leaseID := controllerLeaseID(role, task, taskKey)
+		lease, shouldLaunch := reconcileLeaseDecision(durable, role, leaseID)
+		if !shouldLaunch {
+			if lease.LeaseID == leaseID && lease.Terminal != nil {
+				restoreTerminalLease(lease, task, taskKey)
+			}
+			continue
+		}
 
 		if !git.WorkspaceExists(role) {
 			logx.Event("skipping %s because workspace is missing", role)
@@ -273,7 +365,16 @@ func reconcile(tasks []board.Task) {
 			)
 		}
 
-		startSession(role, task, taskKey, tasks)
+		newLease := ControllerWorkerLease{
+			Intent:  ControllerTaskIntent{TaskID: controllerTaskID(task, taskKey), Role: role, Branch: controllerBranch(task, role)},
+			LeaseID: leaseID, HeartbeatAt: time.Now(), Attempt: 1,
+		}
+		durable.Leases = replaceControllerLease(durable.Leases, newLease)
+		if err := commitControllerState(durable); err != nil {
+			logx.Event("cannot record %s lease; refusing launch: %v", role, err)
+			continue
+		}
+		startSession(role, task, taskKey, tasks, leaseID)
 		if role == teamLeadRole {
 			mu.Lock()
 			lastTeamLeadActivity = time.Now()

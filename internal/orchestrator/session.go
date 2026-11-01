@@ -55,7 +55,7 @@ func shutdownSessions() {
 	}
 }
 
-func startSession(role string, task board.Task, taskKey string, tasks []board.Task) {
+func startSession(role string, task board.Task, taskKey string, tasks []board.Task, leaseID string) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	mu.Lock()
@@ -85,6 +85,23 @@ func startSession(role string, task board.Task, taskKey string, tasks []board.Ta
 					Branch:     task.Branch,
 					Outcome:    outcome,
 					FinishedAt: time.Now(),
+				}
+			}
+			if outcome != sessionCancelled && outcome != sessionUnknown {
+				if state, err := loadControllerState(); err == nil {
+					for i := range state.Leases {
+						if state.Leases[i].LeaseID == leaseID {
+							finishedAt := time.Now()
+							state.Leases[i].HeartbeatAt = finishedAt
+							state.Leases[i].Terminal = &ControllerTerminalResult{Outcome: string(outcome), FinishedAt: finishedAt, Evidence: terminalEvidence(outcome, role, taskKey)}
+							break
+						}
+					}
+					if err := commitControllerState(state); err != nil {
+						logx.Event("cannot persist %s terminal result: %v", role, err)
+					}
+				} else {
+					logx.Event("cannot load controller state for %s terminal result: %v", role, err)
 				}
 			}
 			if outcome == sessionCompleted {

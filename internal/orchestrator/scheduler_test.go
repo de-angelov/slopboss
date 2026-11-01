@@ -335,6 +335,90 @@ func TestBoardStateHashDetectsAnyBoardEdit(t *testing.T) {
 	}
 }
 
+func TestReconcileRestartKeepsRecordedLease(t *testing.T) {
+	withRetryTestState(t)
+	oldStore := controllerStateStore
+	controllerStateStore = NewControllerStateStore(filepath.Join(t.TempDir(), "controller.json"))
+	t.Cleanup(func() { controllerStateStore = oldStore })
+	task := board.Task{ID: "LOOP-02", Branch: "agent/1/reconcile", Key: "LOOP-02", Title: "reconcile"}
+	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: controllerTaskID(task, task.Key), Role: devAgent1Role, Branch: task.Branch}, LeaseID: controllerLeaseID(devAgent1Role, task, task.Key), HeartbeatAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Attempt: 1}
+	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
+	if err := commitControllerState(state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadControllerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := findControllerLease(loaded, devAgent1Role)
+	if !ok || got.LeaseID != lease.LeaseID {
+		t.Fatalf("restart lost lease: %#v", got)
+	}
+	if got.Terminal != nil {
+		t.Fatal("missing heartbeat/result was treated as terminal success")
+	}
+	// A simulated restart has no process-local running entry. Exercise the same
+	// durable gate reconcile uses before it reaches workspace/launch handling.
+	mu.Lock()
+	running = map[string]RunningSession{}
+	mu.Unlock()
+	if _, launch := reconcileLeaseDecision(loaded, devAgent1Role, controllerLeaseID(devAgent1Role, task, task.Key)); launch {
+		t.Fatal("reconciliation would launch a duplicate for the recorded intent")
+	}
+	// Reapplying unchanged intent replaces the same role lease, it cannot append
+	// another lease or produce another launch decision.
+	loaded.Leases = replaceControllerLease(loaded.Leases, lease)
+	if err := commitControllerState(loaded); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = loadControllerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Leases) != 1 {
+		t.Fatalf("unchanged reconciliation has %d leases, want 1", len(loaded.Leases))
+	}
+}
+
+func TestReconcileIdempotentTerminalLeaseRetained(t *testing.T) {
+	withRetryTestState(t)
+	oldStore := controllerStateStore
+	controllerStateStore = NewControllerStateStore(filepath.Join(t.TempDir(), "controller.json"))
+	t.Cleanup(func() { controllerStateStore = oldStore })
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	task := board.Task{ID: "LOOP-02", Branch: "agent/1/reconcile", Key: "LOOP-02", Title: "reconcile"}
+	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: controllerTaskID(task, task.Key), Role: devAgent1Role, Branch: task.Branch}, LeaseID: controllerLeaseID(devAgent1Role, task, task.Key), HeartbeatAt: now, Attempt: 1, Terminal: &ControllerTerminalResult{Outcome: string(sessionCompleted), FinishedAt: now.Add(time.Minute), Evidence: "worker result observed"}}
+	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
+	if err := commitControllerState(state); err != nil {
+		t.Fatal(err)
+	}
+	fingerprintKey := "LOOP-02\x00lane=dev-agent-1\x00done=prior"
+	restoreTerminalLease(lease, task, fingerprintKey)
+	restoreTerminalLease(lease, task, fingerprintKey)
+	mu.Lock()
+	got := finished[devAgent1Role]
+	mu.Unlock()
+	if got.Outcome != sessionCompleted || got.FinishedAt != lease.Terminal.FinishedAt || got.TaskKey != fingerprintKey {
+		t.Fatalf("terminal evidence not reconstructed: %#v", got)
+	}
+	// Repeated restoration for the same fingerprint must leave the consumed
+	// result keyed to that desired intent (and therefore stable for follow-up).
+	restoreTerminalLease(lease, task, fingerprintKey)
+	mu.Lock()
+	gotAgain := finished[devAgent1Role]
+	mu.Unlock()
+	if gotAgain.TaskKey != fingerprintKey {
+		t.Fatalf("terminal restoration changed task key: got %q want %q", gotAgain.TaskKey, fingerprintKey)
+	}
+	loaded, err := loadControllerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Leases) != 1 || loaded.Leases[0].Terminal == nil || loaded.Leases[0].Terminal.Evidence != "worker result observed" {
+		t.Fatalf("terminal evidence was not retained: %#v", loaded)
+	}
+}
+
 func withRetryTestState(t *testing.T) {
 	t.Helper()
 
@@ -351,7 +435,6 @@ func withRetryTestState(t *testing.T) {
 		codexPausedUntil = time.Time{}
 	})
 }
-
 
 func TestCircuitBreakerOpensAfterThreshold(t *testing.T) {
 	withRetryTestState(t)

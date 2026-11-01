@@ -37,6 +37,7 @@ var (
 	circuitBreakers          = map[string]*circuitBreaker{}
 	codexPausedUntil         time.Time
 	lastTeamLeadActivity     time.Time
+	controllerStateStore     = NewControllerStateStore(config.RepoRoot + "/workspaces/controller-state.json")
 
 	// cancelPendingSince records when a running session first stopped matching
 	// the board (its task left its lane, or its key changed). Cancellation is
@@ -83,10 +84,10 @@ const (
 // threshold, preventing a persistently failing task from being retried on every
 // poll. It uses exponential cooldown with a cap.
 type circuitBreaker struct {
-	failures  int
-	state     string // "closed", "open", "half-open"
-	openedAt  time.Time
-	cooldown  time.Duration
+	failures int
+	state    string // "closed", "open", "half-open"
+	openedAt time.Time
+	cooldown time.Duration
 }
 
 const (
