@@ -564,3 +564,145 @@ func TestCircuitBreakerOpensAfterThreshold(t *testing.T) {
 		t.Fatal("expected circuit to be closed after success")
 	}
 }
+
+func TestDurableLoopFailureModes(t *testing.T) {
+	for _, mode := range []string{
+		"controller crash and restart",
+		"worker lost after lease acquisition",
+		"malformed persisted state",
+		"retry exhaustion with independent ready work",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			withRetryTestState(t)
+			root := t.TempDir()
+			oldWorkspaces, oldTeamLead, oldAgent1, oldAgent2, oldCount := config.WorkspacesRoot, config.TeamLeadPath, config.Agent1Path, config.Agent2Path, config.DevAgentCount
+			config.WorkspacesRoot = filepath.Join(root, "workspaces")
+			config.TeamLeadPath = filepath.Join(config.WorkspacesRoot, "repo-tl")
+			config.Agent1Path = filepath.Join(config.WorkspacesRoot, "repo-agent-1")
+			config.Agent2Path = filepath.Join(config.WorkspacesRoot, "repo-agent-2")
+			config.DevAgentCount = 2
+			for _, dir := range []string{config.TeamLeadPath, config.Agent1Path, config.Agent2Path} {
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Cleanup(func() {
+				config.WorkspacesRoot, config.TeamLeadPath, config.Agent1Path, config.Agent2Path, config.DevAgentCount = oldWorkspaces, oldTeamLead, oldAgent1, oldAgent2, oldCount
+			})
+
+			statePath := filepath.Join(root, "controller.json")
+			controllerStateStore = NewControllerStateStore(statePath)
+			oldLaunch := launchControllerSession
+			oldWorkspaceCheck := controllerWorkspaceExists
+			launches := []string{}
+			launchControllerSession = func(role string, task board.Task, taskKey string, _ []board.Task, leaseID string) {
+				launches = append(launches, role+"/"+taskKey+"/"+leaseID)
+			}
+			controllerWorkspaceExists = func(role string) bool { return role == devAgent1Role || role == devAgent2Role || role == teamLeadRole }
+			t.Cleanup(func() { launchControllerSession, controllerWorkspaceExists = oldLaunch, oldWorkspaceCheck })
+			mu.Lock()
+			running = map[string]RunningSession{}
+			finished = map[string]FinishedSession{}
+			cancelPendingSince = map[string]time.Time{}
+			lastTeamLeadActivity = time.Now()
+			mu.Unlock()
+
+			now := time.Now()
+			task1 := board.Task{ID: "LOOP-05-A", Key: "LOOP-05-A", Title: "recover task", Section: config.DevAgentSection(1), Owner: devAgent1Role, Status: "In Progress", Branch: "agent/1/recover"}
+			task2 := board.Task{ID: "LOOP-05-B", Key: "LOOP-05-B", Title: "independent task", Section: config.DevAgentSection(2), Owner: devAgent2Role, Status: "In Progress", Branch: "agent/2/independent"}
+			leaseFor := func(task board.Task, role string, heartbeat time.Time, attempt int, terminal *ControllerTerminalResult) ControllerWorkerLease {
+				return ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: task.ID, Role: role, Branch: task.Branch}, LeaseID: controllerLeaseID(role, task, task.Key), HeartbeatAt: heartbeat, Attempt: attempt, Terminal: terminal}
+			}
+			tasks := []board.Task{task1}
+			state := ControllerState{Version: ControllerStateVersion}
+			switch mode {
+			case "controller crash and restart":
+				state.Leases = []ControllerWorkerLease{leaseFor(task1, devAgent1Role, now, 1, nil)}
+			case "worker lost after lease acquisition":
+				state.Leases = []ControllerWorkerLease{leaseFor(task1, devAgent1Role, now.Add(-11*time.Minute), 1, nil)}
+			case "retry exhaustion with independent ready work":
+				tasks = append(tasks, task2)
+				finished := now
+				state.Leases = []ControllerWorkerLease{
+					leaseFor(task1, devAgent1Role, now, config.MaxFailedSessionRetries+1, &ControllerTerminalResult{Outcome: string(sessionFailed), FinishedAt: finished, Evidence: "transient worker failure"}),
+				}
+			case "malformed persisted state":
+				if err := os.WriteFile(statePath, []byte(`{"version":1,"leases":[`), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode != "malformed persisted state" {
+				if err := commitControllerState(state); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if mode == "malformed persisted state" {
+				if _, err := loadControllerState(); err == nil || !strings.Contains(err.Error(), "decode controller state") {
+					t.Fatalf("malformed state error = %v, want descriptive decode error", err)
+				}
+				reconcile(tasks)
+				if len(launches) != 0 {
+					t.Fatalf("malformed state started workers: %v", launches)
+				}
+				return
+			}
+			if mode == "worker lost after lease acquisition" {
+				lost, launch, reason := recoveryLeaseDecision(state, devAgent1Role, state.Leases[0].LeaseID)
+				if !launch || reason != "" || lost.Attempt != 1 {
+					t.Fatalf("expired lease recovery decision = %#v, launch=%v reason=%q", lost, launch, reason)
+				}
+				reacquired := lost
+				reacquired.Attempt++
+				reacquired.HeartbeatAt = now
+				// Model the state snapshot after the reacquisition commit, then
+				// restart against that live lease and prove it suppresses a duplicate.
+				state.Leases[0] = reacquired
+				if got, retry, why := recoveryLeaseDecision(state, devAgent1Role, reacquired.LeaseID); retry || why != "" || got.Attempt != 2 {
+					t.Fatalf("reacquired durable lease permits duplicate: %#v launch=%v reason=%q", got, retry, why)
+				}
+				return
+			}
+
+			reconcile(tasks)
+			firstCount := len(launches)
+			reconcile(tasks)
+			// Retry exhaustion restores the durable failure into finished state;
+			// the existing Team Lead follow-up policy may therefore schedule its
+			// own distinct task. The durable gate must still suppress another
+			// launch for either task identity.
+			for _, launch := range launches[firstCount:] {
+				for _, previous := range launches[:firstCount] {
+					if launch == previous {
+						t.Fatalf("repeat reconcile duplicated launch %q", launch)
+					}
+				}
+			}
+			persisted, err := loadControllerState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "controller crash and restart":
+				if firstCount != 0 || len(persisted.Leases) != 1 || persisted.Leases[0].Attempt != 1 || persisted.Leases[0].Terminal != nil {
+					t.Fatalf("restart did not preserve active lease without relaunch: launches=%v state=%#v", launches, persisted)
+				}
+			case "retry exhaustion with independent ready work":
+				recovery := Snapshot().Recovery[task1.Key]
+				if !strings.Contains(recovery, "Blocked") || !strings.Contains(recovery, "Team Lead") || !strings.Contains(recovery, "transient worker failure") {
+					t.Fatalf("affected task recovery decision = %q", recovery)
+				}
+				if firstCount != 1 || !strings.Contains(launches[0], devAgent2Role+"/"+task2.Key) {
+					t.Fatalf("exhausted task should stay blocked while independent task launches once: %v", launches)
+				}
+				if len(persisted.Leases) < 2 {
+					t.Fatalf("exhaustion lost independent lease: %#v", persisted.Leases)
+				}
+				blockedLease, found := findControllerLease(persisted, devAgent1Role)
+				if !found || blockedLease.Attempt != config.MaxFailedSessionRetries+1 || blockedLease.Terminal == nil {
+					t.Fatalf("exhaustion altered affected lease: %#v", blockedLease)
+				}
+			}
+		})
+	}
+}

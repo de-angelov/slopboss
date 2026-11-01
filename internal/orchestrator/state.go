@@ -12,6 +12,7 @@ import (
 
 	"github.com/de-angelov/slopboss/internal/board"
 	"github.com/de-angelov/slopboss/internal/config"
+	"github.com/de-angelov/slopboss/internal/git"
 	"github.com/de-angelov/slopboss/internal/provider"
 )
 
@@ -30,15 +31,17 @@ var (
 	// from the --provider flag at startup.
 	sessionProvider provider.Provider = mustCodex()
 
-	mu                       sync.Mutex
-	running                  = map[string]RunningSession{}
-	finished                 = map[string]FinishedSession{}
-	failedSessionRetryCounts = map[string]int{}
-	circuitBreakers          = map[string]*circuitBreaker{}
-	recoveryDecisions        = map[string]string{}
-	codexPausedUntil         time.Time
-	lastTeamLeadActivity     time.Time
-	controllerStateStore     = NewControllerStateStore(config.RepoRoot + "/workspaces/controller-state.json")
+	mu                        sync.Mutex
+	running                   = map[string]RunningSession{}
+	finished                  = map[string]FinishedSession{}
+	failedSessionRetryCounts  = map[string]int{}
+	circuitBreakers           = map[string]*circuitBreaker{}
+	recoveryDecisions         = map[string]string{}
+	codexPausedUntil          time.Time
+	lastTeamLeadActivity      time.Time
+	controllerStateStore      = NewControllerStateStore(config.RepoRoot + "/workspaces/controller-state.json")
+	launchControllerSession   = startSession
+	controllerWorkspaceExists = git.WorkspaceExists
 
 	// cancelPendingSince records when a running session first stopped matching
 	// the board (its task left its lane, or its key changed). Cancellation is

@@ -13,7 +13,6 @@ import (
 
 	"github.com/de-angelov/slopboss/internal/board"
 	"github.com/de-angelov/slopboss/internal/config"
-	"github.com/de-angelov/slopboss/internal/git"
 	"github.com/de-angelov/slopboss/internal/logx"
 )
 
@@ -378,7 +377,7 @@ func reconcile(tasks []board.Task) {
 			continue
 		}
 
-		if !git.WorkspaceExists(role) {
+		if !controllerWorkspaceExists(role) {
 			logx.Event("skipping %s because workspace is missing", role)
 			continue
 		}
@@ -453,7 +452,7 @@ func reconcile(tasks []board.Task) {
 			logx.Event("cannot record %s lease; refusing launch: %v", role, err)
 			continue
 		}
-		startSession(role, task, taskKey, tasks, leaseID)
+		launchControllerSession(role, task, taskKey, tasks, leaseID)
 		if role == teamLeadRole {
 			mu.Lock()
 			lastTeamLeadActivity = time.Now()
