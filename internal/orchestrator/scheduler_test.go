@@ -15,7 +15,7 @@ func TestCanRetryFailedSessionAfterDelayWithoutSideEffects(t *testing.T) {
 	withRetryTestState(t)
 	now := time.Now()
 	session := FinishedSession{
-		Role:       devAgent1Role,
+		Role:       teamLeadRole,
 		TaskKey:    "task-1",
 		Outcome:    sessionFailed,
 		FinishedAt: now.Add(-config.FailedSessionRetryDelay),
@@ -24,7 +24,7 @@ func TestCanRetryFailedSessionAfterDelayWithoutSideEffects(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	canRetry, consumed := canRetryFailedSessionLocked(devAgent1Role, session, now)
+	canRetry, consumed := canRetryFailedSessionLocked(teamLeadRole, session, now)
 	if !canRetry {
 		t.Fatal("expected failed session to be eligible for retry after cooldown")
 	}
@@ -33,14 +33,14 @@ func TestCanRetryFailedSessionAfterDelayWithoutSideEffects(t *testing.T) {
 	}
 
 	// The eligibility check must not have incremented the counter.
-	key := failedSessionRetryKey(devAgent1Role, session.TaskKey)
+	key := failedSessionRetryKey(teamLeadRole, session.TaskKey)
 	if failedSessionRetryCounts[key] != 0 {
 		t.Fatalf("retry count = %d, want 0 (check must be side-effect free)", failedSessionRetryCounts[key])
 	}
 
 	// Recording a retry is the only thing that consumes the budget.
-	if got := recordFailedSessionRetryLocked(devAgent1Role, session.TaskKey); got != 1 {
-		t.Fatalf("recordFailedSessionRetryLocked = %d, want 1", got)
+	if got := recordTeamLeadSessionRetryLocked(session.TaskKey); got != 1 {
+		t.Fatalf("recordTeamLeadSessionRetryLocked = %d, want 1", got)
 	}
 	if failedSessionRetryCounts[key] != 1 {
 		t.Fatalf("retry count = %d, want 1", failedSessionRetryCounts[key])
@@ -175,18 +175,18 @@ func TestCanRetryStopsAtLimit(t *testing.T) {
 	withRetryTestState(t)
 	now := time.Now()
 	session := FinishedSession{
-		Role:       devAgent1Role,
+		Role:       teamLeadRole,
 		TaskKey:    "task-1",
 		Outcome:    sessionFailed,
 		FinishedAt: now.Add(-config.FailedSessionRetryDelay),
 	}
-	key := failedSessionRetryKey(devAgent1Role, session.TaskKey)
+	key := failedSessionRetryKey(teamLeadRole, session.TaskKey)
 	failedSessionRetryCounts[key] = config.MaxFailedSessionRetries
 
 	mu.Lock()
 	defer mu.Unlock()
 
-	canRetry, consumed := canRetryFailedSessionLocked(devAgent1Role, session, now)
+	canRetry, consumed := canRetryFailedSessionLocked(teamLeadRole, session, now)
 	if canRetry {
 		t.Fatal("expected failed session retry limit to be enforced")
 	}
@@ -623,6 +623,7 @@ func TestDurableLoopFailureModes(t *testing.T) {
 		"worker lost after lease acquisition",
 		"malformed persisted state",
 		"retry exhaustion with independent ready work",
+		"retry after restart uses durable attempt",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			withRetryTestState(t)
@@ -673,10 +674,24 @@ func TestDurableLoopFailureModes(t *testing.T) {
 			case "worker lost after lease acquisition":
 				state.Leases = []ControllerWorkerLease{leaseFor(task1, devAgent1Role, now.Add(-11*time.Minute), 1, nil)}
 			case "retry exhaustion with independent ready work":
+				fallthrough
+			case "retry after restart uses durable attempt":
 				tasks = append(tasks, task2)
-				finished := now
+				finishedAt := now
+				attempt := config.MaxFailedSessionRetries + 1
+				if mode == "retry after restart uses durable attempt" {
+					attempt = 1
+					finishedAt = now.Add(-config.FailedSessionRetryDelay)
+					failedSessionRetryCounts[failedSessionRetryKey(devAgent1Role, task1.Key)] = config.MaxFailedSessionRetries
+					mu.Lock()
+					finished[devAgent1Role] = FinishedSession{
+						Role: devAgent1Role, Task: task1.Title, TaskKey: task1.Key,
+						Outcome: sessionFailed, FinishedAt: finishedAt,
+					}
+					mu.Unlock()
+				}
 				state.Leases = []ControllerWorkerLease{
-					leaseFor(task1, devAgent1Role, now, config.MaxFailedSessionRetries+1, &ControllerTerminalResult{Outcome: string(sessionFailed), FinishedAt: finished, Evidence: "transient worker failure"}),
+					leaseFor(task1, devAgent1Role, finishedAt, attempt, &ControllerTerminalResult{Outcome: string(sessionFailed), FinishedAt: finishedAt, Evidence: "transient worker failure"}),
 				}
 			case "malformed persisted state":
 				if err := os.WriteFile(statePath, []byte(`{"version":1,"leases":[`), 0644); err != nil {
@@ -753,6 +768,28 @@ func TestDurableLoopFailureModes(t *testing.T) {
 				blockedLease, found := findControllerLease(persisted, devAgent1Role)
 				if !found || blockedLease.Attempt != config.MaxFailedSessionRetries+1 || blockedLease.Terminal == nil {
 					t.Fatalf("exhaustion altered affected lease: %#v", blockedLease)
+				}
+			case "retry after restart uses durable attempt":
+				if len(launches) < 2 {
+					t.Fatalf("durable retry and independent ready work did not both launch: %v", launches)
+				}
+				for _, task := range []board.Task{task1, task2} {
+					count := 0
+					for _, launch := range launches {
+						if strings.Contains(launch, "/"+task.Key+"/") {
+							count++
+						}
+					}
+					if count != 1 {
+						t.Fatalf("task %s launch count = %d, launches %v", task.Key, count, launches)
+					}
+				}
+				if failedSessionRetryCounts[failedSessionRetryKey(devAgent1Role, task1.Key)] != config.MaxFailedSessionRetries {
+					t.Fatal("dev retry consumed the process-local retry budget")
+				}
+				retried, found := findControllerLease(persisted, devAgent1Role)
+				if !found || retried.Attempt != 2 || retried.Terminal != nil {
+					t.Fatalf("retry did not advance from durable Attempt: %#v", retried)
 				}
 			}
 		})
