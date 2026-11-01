@@ -38,9 +38,16 @@ func reportSessionTerminal(leaseID string, outcome SessionOutcome, role, taskKey
 		if state.Leases[i].LeaseID != leaseID {
 			continue
 		}
+		evidence := terminalEvidence(outcome, role, taskKey)
+		if prior := state.Leases[i].Terminal; prior != nil {
+			if prior.Outcome == string(outcome) && prior.Evidence == evidence {
+				return nil
+			}
+			return fmt.Errorf("controller lease %q already has terminal result %q", leaseID, prior.Outcome)
+		}
 		finishedAt := time.Now()
 		state.Leases[i].HeartbeatAt = finishedAt
-		state.Leases[i].Terminal = &ControllerTerminalResult{Outcome: string(outcome), FinishedAt: finishedAt, Evidence: terminalEvidence(outcome, role, taskKey)}
+		state.Leases[i].Terminal = &ControllerTerminalResult{Outcome: string(outcome), FinishedAt: finishedAt, Evidence: evidence}
 		return commitControllerState(state)
 	}
 	return fmt.Errorf("controller lease %q not found for terminal event", leaseID)

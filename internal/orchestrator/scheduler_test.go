@@ -524,6 +524,58 @@ func TestReconcileIdempotentTerminalLeaseRetained(t *testing.T) {
 	}
 }
 
+func TestTerminalEvidenceHasOneDurableFollowUpHandoff(t *testing.T) {
+	withRetryTestState(t)
+	mu.Lock()
+	finished = map[string]FinishedSession{}
+	mu.Unlock()
+	oldStore := controllerStateStore
+	controllerStateStore = NewControllerStateStore(filepath.Join(t.TempDir(), "controller.json"))
+	t.Cleanup(func() { controllerStateStore = oldStore })
+	task := board.Task{ID: "SIMP-01", Branch: "agent/1/simp", Key: "SIMP-01", Title: "Simplify terminal lifecycle"}
+	leaseID := controllerLeaseID(devAgent1Role, task, task.Key)
+	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{{
+		Intent:  ControllerTaskIntent{TaskID: controllerTaskID(task, task.Key), Role: devAgent1Role, Branch: task.Branch},
+		LeaseID: leaseID, HeartbeatAt: time.Now(), Attempt: 1,
+	}}}
+	if err := commitControllerState(state); err != nil {
+		t.Fatal(err)
+	}
+	if err := reportSessionTerminal(leaseID, sessionCompleted, devAgent1Role, task.Key); err != nil {
+		t.Fatal(err)
+	}
+	first, err := loadControllerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reportSessionTerminal(leaseID, sessionCompleted, devAgent1Role, task.Key); err != nil {
+		t.Fatalf("equivalent terminal evidence should be idempotent: %v", err)
+	}
+	second, err := loadControllerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *first.Leases[0].Terminal != *second.Leases[0].Terminal {
+		t.Fatalf("repeated evidence changed durable terminal transition: first %#v, second %#v", first.Leases[0].Terminal, second.Leases[0].Terminal)
+	}
+
+	// Follow-up ownership is reconstructed from the durable controller record.
+	restoreTerminalLease(second.Leases[0], task, task.Key)
+	restored := Snapshot().Finished
+	if len(restored) != 1 || restored[devAgent1Role].Outcome != sessionCompleted {
+		t.Fatalf("durable terminal result produced finished sessions %#v, want one completed dev session", restored)
+	}
+	followUp, ok := completionFollowUpTask()
+	if !ok || !strings.Contains(followUp.Body, task.Title) {
+		t.Fatalf("durable completion did not produce its Team Lead hand-off: task=%#v ok=%v", followUp, ok)
+	}
+	restoreTerminalLease(second.Leases[0], task, task.Key)
+	followUpAgain, ok := completionFollowUpTask()
+	if !ok || followUpAgain.Key != followUp.Key {
+		t.Fatalf("repeated reconciliation duplicated or changed follow-up: first=%#v second=%#v", followUp, followUpAgain)
+	}
+}
+
 func withRetryTestState(t *testing.T) {
 	t.Helper()
 
