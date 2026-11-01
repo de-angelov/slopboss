@@ -28,6 +28,26 @@ func loadControllerState() (ControllerState, error) {
 
 func commitControllerState(state ControllerState) error { return controllerStateStore.Commit(state) }
 
+func commitRecoveryLease(state ControllerState, lease ControllerWorkerLease, taskKey string) error {
+	state.Leases = replaceControllerLease(state.Leases, lease)
+	if err := commitControllerState(state); err != nil {
+		return err
+	}
+	mu.Lock()
+	delete(recoveryDecisions, taskKey)
+	mu.Unlock()
+	return nil
+}
+
+func recordRecoveryDecision(taskKey, reason string) {
+	if reason == "" {
+		return
+	}
+	mu.Lock()
+	recoveryDecisions[taskKey] = reason
+	mu.Unlock()
+}
+
 func controllerTaskID(task board.Task, key string) string {
 	if task.ID != "" {
 		return task.ID
@@ -58,14 +78,48 @@ func findControllerLease(state ControllerState, role string) (ControllerWorkerLe
 // intent is authoritative across restart; a nonterminal prior lease for the
 // role is runtime evidence and also suppresses a second worker.
 func reconcileLeaseDecision(state ControllerState, role, leaseID string) (ControllerWorkerLease, bool) {
+	lease, launch, _ := recoveryLeaseDecision(state, role, leaseID)
+	return lease, launch
+}
+
+func recoveryLeaseDecision(state ControllerState, role, leaseID string) (ControllerWorkerLease, bool, string) {
 	lease, found := findControllerLease(state, role)
 	if !found {
-		return ControllerWorkerLease{}, true
+		return ControllerWorkerLease{}, true, ""
+	}
+	if lease.LeaseID == leaseID && lease.Terminal == nil && time.Since(lease.HeartbeatAt) >= 10*time.Minute {
+		return lease, true, ""
+	}
+	if lease.LeaseID == leaseID && lease.Terminal != nil {
+		if retryableDurableResult(lease) {
+			if lease.Attempt > config.MaxFailedSessionRetries {
+				return lease, false, fmt.Sprintf("Blocked: retry attempts exhausted (%d); Team Lead review required (%s)", lease.Attempt-1, lease.Terminal.Evidence)
+			}
+			return lease, true, ""
+		}
+		if lease.Terminal.Outcome != string(sessionCompleted) {
+			return lease, false, "Blocked: ambiguous worker result; Team Lead review required (" + lease.Terminal.Evidence + ")"
+		}
+		return lease, false, ""
 	}
 	if lease.LeaseID == leaseID || lease.Terminal == nil {
-		return lease, false
+		return lease, false, ""
 	}
-	return lease, true
+	return lease, true, ""
+}
+
+// retryableDurableResult accepts only outcomes whose controller evidence is
+// recognized as transient/interrupted. Unknown outcomes require human review.
+func retryableDurableResult(lease ControllerWorkerLease) bool {
+	if lease.Terminal == nil {
+		return false
+	}
+	switch SessionOutcome(lease.Terminal.Outcome) {
+	case sessionFailed, sessionCancelled, sessionUsageLimited:
+		return true
+	default:
+		return false
+	}
 }
 func replaceControllerLease(leases []ControllerWorkerLease, lease ControllerWorkerLease) []ControllerWorkerLease {
 	for i := range leases {
@@ -294,7 +348,10 @@ func reconcile(tasks []board.Task) {
 		task := desiredSession.Task
 		taskKey := desiredSession.TaskKey
 		leaseID := controllerLeaseID(role, task, taskKey)
-		lease, shouldLaunch := reconcileLeaseDecision(durable, role, leaseID)
+		lease, shouldLaunch, recoveryReason := recoveryLeaseDecision(durable, role, leaseID)
+		if recoveryReason != "" {
+			recordRecoveryDecision(taskKey, recoveryReason)
+		}
 		if !shouldLaunch {
 			if lease.LeaseID == leaseID && lease.Terminal != nil {
 				restoreTerminalLease(lease, task, taskKey)
@@ -365,12 +422,15 @@ func reconcile(tasks []board.Task) {
 			)
 		}
 
+		attempt := 1
+		if lease.LeaseID == leaseID {
+			attempt = lease.Attempt + 1
+		}
 		newLease := ControllerWorkerLease{
 			Intent:  ControllerTaskIntent{TaskID: controllerTaskID(task, taskKey), Role: role, Branch: controllerBranch(task, role)},
-			LeaseID: leaseID, HeartbeatAt: time.Now(), Attempt: 1,
+			LeaseID: leaseID, HeartbeatAt: time.Now(), Attempt: attempt,
 		}
-		durable.Leases = replaceControllerLease(durable.Leases, newLease)
-		if err := commitControllerState(durable); err != nil {
+		if err := commitRecoveryLease(durable, newLease, taskKey); err != nil {
 			logx.Event("cannot record %s lease; refusing launch: %v", role, err)
 			continue
 		}

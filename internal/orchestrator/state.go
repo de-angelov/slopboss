@@ -35,6 +35,7 @@ var (
 	finished                 = map[string]FinishedSession{}
 	failedSessionRetryCounts = map[string]int{}
 	circuitBreakers          = map[string]*circuitBreaker{}
+	recoveryDecisions        = map[string]string{}
 	codexPausedUntil         time.Time
 	lastTeamLeadActivity     time.Time
 	controllerStateStore     = NewControllerStateStore(config.RepoRoot + "/workspaces/controller-state.json")
@@ -107,6 +108,7 @@ type StateSnapshot struct {
 	Finished     map[string]FinishedSession
 	ProviderName string
 	CircuitOpen  map[string]bool
+	Recovery     map[string]string // task key -> controller recovery decision/reason
 }
 
 // Snapshot returns a consistent copy of the current session state.
@@ -118,6 +120,7 @@ func Snapshot() StateSnapshot {
 		Running:     make(map[string]RunningSession, len(running)),
 		Finished:    make(map[string]FinishedSession, len(finished)),
 		CircuitOpen: make(map[string]bool),
+		Recovery:    make(map[string]string, len(recoveryDecisions)),
 	}
 	for k, v := range running {
 		snap.Running[k] = v
@@ -129,6 +132,9 @@ func Snapshot() StateSnapshot {
 		if cb != nil && cb.state == circuitOpen {
 			snap.CircuitOpen[k] = true
 		}
+	}
+	for k, v := range recoveryDecisions {
+		snap.Recovery[k] = v
 	}
 	if sessionProvider != nil {
 		snap.ProviderName = sessionProvider.Name()

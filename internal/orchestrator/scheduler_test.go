@@ -47,6 +47,111 @@ func TestCanRetryFailedSessionAfterDelayWithoutSideEffects(t *testing.T) {
 	}
 }
 
+func TestRecoveryPolicyRecognizesTransientAndAmbiguousResults(t *testing.T) {
+	base := ControllerWorkerLease{LeaseID: "lease", Attempt: 1, HeartbeatAt: time.Now()}
+	for _, outcome := range []SessionOutcome{sessionFailed, sessionCancelled, sessionUsageLimited} {
+		lease := base
+		lease.Terminal = &ControllerTerminalResult{Outcome: string(outcome), FinishedAt: time.Now(), Evidence: "worker reported"}
+		if !retryableDurableResult(lease) {
+			t.Errorf("%q should be retryable", outcome)
+		}
+	}
+	for _, outcome := range []SessionOutcome{sessionUnknown, sessionCompleted} {
+		lease := base
+		lease.Terminal = &ControllerTerminalResult{Outcome: string(outcome), FinishedAt: time.Now(), Evidence: "worker reported"}
+		if retryableDurableResult(lease) {
+			t.Errorf("%q should require review or remain complete", outcome)
+		}
+	}
+}
+
+func TestExpiredLeaseIsRetryableAndSameLiveLeaseIsNot(t *testing.T) {
+	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{Role: devAgent1Role}, LeaseID: "id", HeartbeatAt: time.Now().Add(-11 * time.Minute), Attempt: 1}
+	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
+	if _, launch := reconcileLeaseDecision(state, devAgent1Role, "id"); !launch {
+		t.Fatal("expired lease should be recovered")
+	}
+	lease.HeartbeatAt = time.Now()
+	state.Leases[0] = lease
+	if _, launch := reconcileLeaseDecision(state, devAgent1Role, "id"); launch {
+		t.Fatal("live lease should suppress duplicate launch")
+	}
+}
+
+func TestRecoveryRetryCountComesFromDurableAttempt(t *testing.T) {
+	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{Role: devAgent1Role}, LeaseID: "id", Attempt: config.MaxFailedSessionRetries + 1, HeartbeatAt: time.Now(), Terminal: &ControllerTerminalResult{Outcome: string(sessionFailed), FinishedAt: time.Now(), Evidence: "transient"}}
+	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
+	got, retry := reconcileLeaseDecision(state, devAgent1Role, "id")
+	if retry || got.Attempt != config.MaxFailedSessionRetries+1 {
+		t.Fatalf("durable exhaustion decision = %#v, launch %v", got, retry)
+	}
+}
+
+func TestRecoveryDecisionSnapshotExposesExhaustionAndAmbiguousEvidence(t *testing.T) {
+	withRetryTestState(t)
+	for _, tc := range []struct {
+		name, taskKey, outcome, evidence string
+		attempt                          int
+		want                             string
+	}{
+		{"exhaustion", "spent-task", string(sessionFailed), "transient: worker exited", config.MaxFailedSessionRetries + 1, "Blocked: retry attempts exhausted"},
+		{"ambiguity", "unclear-task", string(sessionUnknown), "provider returned an unclassified result", 1, "Blocked: ambiguous worker result"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			leaseID := "lease-" + tc.taskKey
+			now := time.Now()
+			lease := ControllerWorkerLease{Intent: ControllerTaskIntent{Role: devAgent1Role}, LeaseID: leaseID, Attempt: tc.attempt, HeartbeatAt: now, Terminal: &ControllerTerminalResult{Outcome: tc.outcome, FinishedAt: now, Evidence: tc.evidence}}
+			state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
+			_, launch, reason := recoveryLeaseDecision(state, devAgent1Role, leaseID)
+			if launch || !strings.Contains(reason, tc.want) {
+				t.Fatalf("decision = launch %v, reason %q", launch, reason)
+			}
+			recordRecoveryDecision(tc.taskKey, reason)
+			got := Snapshot().Recovery[tc.taskKey]
+			if !strings.Contains(got, "Blocked") || !strings.Contains(got, "Team Lead") || !strings.Contains(got, tc.evidence) {
+				t.Fatalf("snapshot decision %q did not retain required decision/evidence", got)
+			}
+		})
+	}
+}
+
+func TestBlockedLeaseDoesNotSuppressDistinctReadyRole(t *testing.T) {
+	blockedID := "blocked"
+	now := time.Now()
+	blocked := ControllerWorkerLease{Intent: ControllerTaskIntent{Role: devAgent1Role}, LeaseID: blockedID, Attempt: config.MaxFailedSessionRetries + 1, HeartbeatAt: now, Terminal: &ControllerTerminalResult{Outcome: string(sessionFailed), FinishedAt: now, Evidence: "exhausted"}}
+	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{blocked}}
+	_, launchBlocked, reason := recoveryLeaseDecision(state, devAgent1Role, blockedID)
+	if launchBlocked || reason == "" {
+		t.Fatalf("blocked role decision = launch %v, reason %q", launchBlocked, reason)
+	}
+	_, launchReady, readyReason := recoveryLeaseDecision(state, devAgent2Role, "new-ready-task")
+	if !launchReady || readyReason != "" {
+		t.Fatalf("independent ready role decision = launch %v, reason %q", launchReady, readyReason)
+	}
+}
+
+func TestSuccessfulRecoveryLeaseClearsStaleDecision(t *testing.T) {
+	withRetryTestState(t)
+	controllerStateStore = NewControllerStateStore(filepath.Join(t.TempDir(), "controller.json"))
+	taskKey := "recover-me"
+	recordRecoveryDecision(taskKey, "Blocked: retry attempts exhausted; Team Lead review required")
+	now := time.Now()
+	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: "task", Role: devAgent1Role, Branch: "branch"}, LeaseID: "new-lease", HeartbeatAt: now, Attempt: 2}
+	if err := commitRecoveryLease(ControllerState{Version: ControllerStateVersion}, lease, taskKey); err != nil {
+		t.Fatal(err)
+	}
+	if got := Snapshot().Recovery[taskKey]; got != "" {
+		t.Fatalf("stale recovery decision remains after durable lease: %q", got)
+	}
+	loaded, err := loadControllerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Leases) != 1 || loaded.Leases[0].LeaseID != lease.LeaseID {
+		t.Fatalf("recovery lease not durably recorded: %#v", loaded.Leases)
+	}
+}
+
 func TestCanRetryFailedSessionBeforeDelay(t *testing.T) {
 	withRetryTestState(t)
 	now := time.Now()
@@ -341,7 +446,7 @@ func TestReconcileRestartKeepsRecordedLease(t *testing.T) {
 	controllerStateStore = NewControllerStateStore(filepath.Join(t.TempDir(), "controller.json"))
 	t.Cleanup(func() { controllerStateStore = oldStore })
 	task := board.Task{ID: "LOOP-02", Branch: "agent/1/reconcile", Key: "LOOP-02", Title: "reconcile"}
-	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: controllerTaskID(task, task.Key), Role: devAgent1Role, Branch: task.Branch}, LeaseID: controllerLeaseID(devAgent1Role, task, task.Key), HeartbeatAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Attempt: 1}
+	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: controllerTaskID(task, task.Key), Role: devAgent1Role, Branch: task.Branch}, LeaseID: controllerLeaseID(devAgent1Role, task, task.Key), HeartbeatAt: time.Now(), Attempt: 1}
 	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
 	if err := commitControllerState(state); err != nil {
 		t.Fatal(err)
@@ -426,12 +531,14 @@ func withRetryTestState(t *testing.T) {
 	config.LogFilePath = filepath.Join(t.TempDir(), "orchestrator.log")
 	failedSessionRetryCounts = map[string]int{}
 	circuitBreakers = map[string]*circuitBreaker{}
+	recoveryDecisions = map[string]string{}
 	codexPausedUntil = time.Time{}
 
 	t.Cleanup(func() {
 		config.LogFilePath = oldLogFilePath
 		failedSessionRetryCounts = map[string]int{}
 		circuitBreakers = map[string]*circuitBreaker{}
+		recoveryDecisions = map[string]string{}
 		codexPausedUntil = time.Time{}
 	})
 }
