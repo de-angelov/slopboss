@@ -339,7 +339,9 @@ func reconcile(tasks []board.Task) {
 	mu.Lock()
 	for role := range finished {
 		if _, stillDesired := desired[role]; !stillDesired {
-			delete(failedSessionRetryCounts, failedSessionRetryKey(role, finished[role].TaskKey))
+			if role == teamLeadRole {
+				delete(failedSessionRetryCounts, failedSessionRetryKey(role, finished[role].TaskKey))
+			}
 			delete(finished, role)
 		}
 	}
@@ -395,7 +397,9 @@ func reconcile(tasks []board.Task) {
 		_, exists := running[role]
 		finishedSession, alreadyFinished := finished[role]
 		if alreadyFinished && finishedSession.TaskKey != taskKey {
-			delete(failedSessionRetryCounts, failedSessionRetryKey(role, finishedSession.TaskKey))
+			if role == teamLeadRole {
+				delete(failedSessionRetryCounts, failedSessionRetryKey(role, finishedSession.TaskKey))
+			}
 			delete(finished, role)
 			alreadyFinished = false
 		}
@@ -435,7 +439,7 @@ func reconcile(tasks []board.Task) {
 		}
 
 		// Charge a retry only now that the launch is actually happening.
-		if canRetry {
+		if canRetry && role == teamLeadRole {
 			mu.Lock()
 			retryCount := recordFailedSessionRetryLocked(role, taskKey)
 			mu.Unlock()
@@ -614,16 +618,23 @@ func canRetryFailedSessionLocked(role string, session FinishedSession, now time.
 		return false, 0
 	}
 
-	retries := failedSessionRetryCounts[failedSessionRetryKey(role, session.TaskKey)]
-	if retries >= config.MaxFailedSessionRetries {
-		return false, retries
+	if role == teamLeadRole {
+		retries := failedSessionRetryCounts[failedSessionRetryKey(role, session.TaskKey)]
+		if retries >= config.MaxFailedSessionRetries {
+			return false, retries
+		}
+		return true, retries
 	}
-	return true, retries
+	// Dev-agent retries are bounded by the durable controller lease Attempt.
+	return true, 0
 }
 
 // recordFailedSessionRetryLocked consumes one retry for the task and returns the
 // new count. Callers must hold mu.
 func recordFailedSessionRetryLocked(role string, taskKey string) int {
+	if role != teamLeadRole {
+		return 0
+	}
 	key := failedSessionRetryKey(role, taskKey)
 	failedSessionRetryCounts[key]++
 	return failedSessionRetryCounts[key]

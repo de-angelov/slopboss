@@ -77,7 +77,7 @@ func startSession(role string, task board.Task, taskKey string, tasks []board.Ta
 			mu.Lock()
 			delete(running, role)
 			delete(cancelPendingSince, role)
-			if outcome == sessionCompleted {
+			if outcome == sessionCompleted && role == teamLeadRole {
 				delete(failedSessionRetryCounts, failedSessionRetryKey(role, taskKey))
 			}
 			if outcome != sessionCancelled && outcome != sessionUsageLimited {
