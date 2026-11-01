@@ -28,6 +28,25 @@ func loadControllerState() (ControllerState, error) {
 
 func commitControllerState(state ControllerState) error { return controllerStateStore.Commit(state) }
 
+// reportSessionTerminal accepts worker execution evidence as a controller
+// event. Only this controller-side handler changes the durable lease snapshot.
+func reportSessionTerminal(leaseID string, outcome SessionOutcome, role, taskKey string) error {
+	state, err := loadControllerState()
+	if err != nil {
+		return err
+	}
+	for i := range state.Leases {
+		if state.Leases[i].LeaseID != leaseID {
+			continue
+		}
+		finishedAt := time.Now()
+		state.Leases[i].HeartbeatAt = finishedAt
+		state.Leases[i].Terminal = &ControllerTerminalResult{Outcome: string(outcome), FinishedAt: finishedAt, Evidence: terminalEvidence(outcome, role, taskKey)}
+		return commitControllerState(state)
+	}
+	return fmt.Errorf("controller lease %q not found for terminal event", leaseID)
+}
+
 func commitRecoveryLease(state ControllerState, lease ControllerWorkerLease, taskKey string) error {
 	state.Leases = replaceControllerLease(state.Leases, lease)
 	if err := commitControllerState(state); err != nil {

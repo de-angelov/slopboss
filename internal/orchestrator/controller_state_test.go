@@ -99,3 +99,82 @@ func TestControllerStateLoadRejectsUnknownVersion(t *testing.T) {
 		t.Fatalf("Load() error = %v, want unsupported version", err)
 	}
 }
+
+func TestControllerTransitionRejectsMutationBeforePersistence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store := NewControllerStateStore(path)
+	valid := validControllerState()
+	if err := store.Commit(valid); err != nil {
+		t.Fatal(err)
+	}
+	invalid := valid
+	invalid.Leases = append([]ControllerWorkerLease(nil), valid.Leases...)
+	invalid.Leases[0].Intent.TaskID = "LOOP-99"
+	if err := store.Commit(invalid); err == nil {
+		t.Fatal("Commit() accepted mutation of an existing lease identity")
+	}
+	got, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Leases[0].Intent != valid.Leases[0].Intent || *got.Leases[0].Terminal != *valid.Leases[0].Terminal {
+		t.Fatalf("invalid transition changed durable state: got %#v", got)
+	}
+}
+
+func TestControllerTransitionAtomicallyReplacesCompleteState(t *testing.T) {
+	store := NewControllerStateStore(filepath.Join(t.TempDir(), "state.json"))
+	initial := validControllerState()
+	initial.Leases[0].Terminal = nil
+	if err := store.Commit(initial); err != nil {
+		t.Fatal(err)
+	}
+	next := initial
+	next.Leases = append([]ControllerWorkerLease(nil), initial.Leases...)
+	next.Leases[0].HeartbeatAt = initial.Leases[0].HeartbeatAt.Add(2 * time.Minute)
+	next.Leases[0].Terminal = &ControllerTerminalResult{Outcome: "failed", FinishedAt: initial.Leases[0].HeartbeatAt.Add(3 * time.Minute), Evidence: "worker reported failure"}
+	next.Leases = append(next.Leases, ControllerWorkerLease{
+		Intent:  ControllerTaskIntent{TaskID: "LOOP-02", Role: "dev-agent-2", Branch: "agent/2/task"},
+		LeaseID: "lease-456", HeartbeatAt: initial.Leases[0].HeartbeatAt, Attempt: 1,
+	})
+	if err := store.Commit(next); err != nil {
+		t.Fatalf("Commit() valid transition: %v", err)
+	}
+	got, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Leases) != 2 || got.Leases[0].HeartbeatAt != next.Leases[0].HeartbeatAt ||
+		got.Leases[0].Terminal == nil || *got.Leases[0].Terminal != *next.Leases[0].Terminal ||
+		got.Leases[1] != next.Leases[1] {
+		t.Fatalf("Commit() did not replace the complete candidate snapshot: got %#v, want %#v", got, next)
+	}
+}
+
+func TestControllerTransitionPersistsNextRetryAttempt(t *testing.T) {
+	store := NewControllerStateStore(filepath.Join(t.TempDir(), "state.json"))
+	terminal := validControllerState()
+	terminal.Leases[0].Attempt = 3
+	terminal.Leases[0].Terminal.Outcome = "failed"
+	if err := store.Commit(terminal); err != nil {
+		t.Fatal(err)
+	}
+
+	retry := terminal
+	retry.Leases = append([]ControllerWorkerLease(nil), terminal.Leases...)
+	retry.Leases[0].Attempt++
+	retry.Leases[0].HeartbeatAt = terminal.Leases[0].Terminal.FinishedAt.Add(time.Second)
+	retry.Leases[0].Terminal = nil
+	if err := store.Commit(retry); err != nil {
+		t.Fatalf("Commit() legal retry attempt: %v", err)
+	}
+
+	got, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Leases[0].LeaseID != terminal.Leases[0].LeaseID || got.Leases[0].Intent != terminal.Leases[0].Intent ||
+		got.Leases[0].Attempt != terminal.Leases[0].Attempt+1 || got.Leases[0].Terminal != nil {
+		t.Fatalf("retry state was not persisted: got %#v", got.Leases[0])
+	}
+}

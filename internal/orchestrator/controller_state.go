@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -47,6 +48,7 @@ type ControllerWorkerLease struct {
 // mutation operations.
 type ControllerStateStore struct {
 	path string
+	mu   sync.Mutex
 }
 
 func NewControllerStateStore(path string) *ControllerStateStore {
@@ -72,8 +74,18 @@ func (s *ControllerStateStore) Load() (ControllerState, error) {
 // Commit validates and atomically replaces the durable snapshot. Invalid
 // candidates never touch the currently committed file.
 func (s *ControllerStateStore) Commit(candidate ControllerState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ValidateControllerState(candidate); err != nil {
 		return err
+	}
+	previous, err := s.Load()
+	if err == nil {
+		if err := ValidateControllerTransition(previous, candidate); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("load prior controller state: %w", err)
 	}
 	data, err := json.MarshalIndent(candidate, "", "  ")
 	if err != nil {
@@ -100,6 +112,62 @@ func (s *ControllerStateStore) Commit(candidate ControllerState) error {
 	}
 	if err := os.Rename(tmp, s.path); err != nil {
 		return fmt.Errorf("commit controller state: %w", err)
+	}
+	dir, err := os.Open(filepath.Dir(s.path))
+	if err == nil {
+		err = dir.Sync()
+		_ = dir.Close()
+	}
+	if err != nil {
+		return fmt.Errorf("sync controller state directory: %w", err)
+	}
+	return nil
+}
+
+// ValidateControllerTransition enforces the lifecycle of each durable lease.
+// A retry keeps its deterministic lease ID and intent while advancing the
+// attempt and clearing the prior terminal result. A new task may replace a
+// terminal lease for the role and starts at attempt one.
+func ValidateControllerTransition(previous, candidate ControllerState) error {
+	if err := ValidateControllerState(previous); err != nil {
+		return fmt.Errorf("invalid prior controller state: %w", err)
+	}
+	if err := ValidateControllerState(candidate); err != nil {
+		return err
+	}
+	nextByRole := make(map[string]ControllerWorkerLease, len(candidate.Leases))
+	for _, lease := range candidate.Leases {
+		nextByRole[lease.Intent.Role] = lease
+	}
+	for _, old := range previous.Leases {
+		next, exists := nextByRole[old.Intent.Role]
+		if !exists {
+			return fmt.Errorf("controller transition removes role lease %q", old.Intent.Role)
+		}
+		if old.Intent != next.Intent {
+			if old.Terminal == nil || next.Attempt != 1 || old.LeaseID == next.LeaseID {
+				return fmt.Errorf("controller transition for role %q has invalid task replacement", old.Intent.Role)
+			}
+			continue
+		}
+		if old.LeaseID != next.LeaseID {
+			return fmt.Errorf("controller transition mutates lease identity for role %q", old.Intent.Role)
+		}
+		if next.Attempt == old.Attempt+1 {
+			if old.Terminal == nil || next.Terminal != nil {
+				return fmt.Errorf("controller transition for role %q must retry a terminal lease with a clear result", old.Intent.Role)
+			}
+			continue
+		}
+		if old.Attempt != next.Attempt {
+			return fmt.Errorf("controller transition for role %q must advance exactly one attempt", old.Intent.Role)
+		}
+		if next.HeartbeatAt.Before(old.HeartbeatAt) {
+			return fmt.Errorf("controller transition regresses heartbeat for role %q", old.Intent.Role)
+		}
+		if old.Terminal != nil && (next.Terminal == nil || *old.Terminal != *next.Terminal) {
+			return fmt.Errorf("controller transition mutates terminal result for role %q", old.Intent.Role)
+		}
 	}
 	return nil
 }

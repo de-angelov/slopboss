@@ -44,6 +44,7 @@ func DevAgentRuntimeInstructions() string {
 Role: Dev Agent
 Runtime Rules:
 - Work only on the assigned task and keep changes focused.
+- Report execution evidence only. Do not directly mutate shared board files or shared board/controller state; the Team Lead is the planning and review proxy for board lifecycle actions.
 - The current working directory is already the assigned product repository. Do not cd into "workspaces/repo-agent-*" unless that directory exists from the current working directory.
 - Use the existing repository test stack. If a missing tool or unrelated type error blocks verification, report it instead of expanding scope.
 - File reading discipline: avoid reading entire large files (>300 lines) with unbounded reads. Locate target functions first (e.g. with grep -n) and read targeted line ranges.
