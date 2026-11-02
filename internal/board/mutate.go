@@ -498,7 +498,9 @@ func validateWholeDocument(data, file string) error {
 		}
 		if strings.HasPrefix(h, "## ") && !strings.HasPrefix(h, "### ") {
 			section := strings.TrimSpace(strings.TrimPrefix(h, "## "))
-			if sections[section] {
+			// ARCHIVE.md may contain multiple historical Done sections. Moves
+			// use insertTask's first-match rule, making the destination stable.
+			if sections[section] && !(file == "archive" && section == "Done") {
 				return fmt.Errorf("duplicate section heading %q", section)
 			}
 			sections[section] = true
