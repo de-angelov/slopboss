@@ -143,6 +143,30 @@ func TestSetArchiveCollapsesIdenticalRecordsAndRejectsConflicts(t *testing.T) {
 	}
 }
 
+func TestSetArchiveCollapsesRecordsAcrossRepeatedArchiveSnapshotHeadings(t *testing.T) {
+	dir := t.TempDir()
+	withBoardFiles(t, dir)
+	writeBoard(t, config.BacklogFile, "# BACKLOG\n\n## Backlog\n\n### Archive me\nTask ID: TASK-snapshot-archive\nOwner: Unassigned\nStatus: Backlog\n\nNew body.\n")
+	duplicate := "### Historical\nTask ID: OPS-02\nOwner: Dev Agent 2\nStatus: Done\n\nObjective:\nPreserve this historical body.\n"
+	archive := "# ARCHIVE\n\n## Done\n\n" + duplicate + "\n# ARCHIVE\n\n## Done\n\n" + duplicate
+	writeBoard(t, config.ArchiveFile, archive)
+
+	_, err := Set("TASK-snapshot-archive", Update{File: "archive", Section: "Done", Owner: "Dev Agent 2", Status: "Done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(config.ArchiveFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(got), "Task ID: OPS-02") != 1 {
+		t.Fatalf("identical snapshot record was not collapsed:\n%s", got)
+	}
+	if !strings.Contains(string(got), "Preserve this historical body.") || !strings.Contains(string(got), "TASK-snapshot-archive") {
+		t.Fatalf("archive did not retain history and new task:\n%s", got)
+	}
+}
+
 func TestSetMovesTaskWithinDocument(t *testing.T) {
 	dir := t.TempDir()
 	withBoardFiles(t, dir)
