@@ -106,14 +106,15 @@ func Check(opts Options) []Finding {
 	if err != nil {
 		add("FAIL", "git", "git executable unavailable; install git and put it on PATH")
 	} else {
-		if err := o.Run(gitPath, "-C", o.Root, "remote", "get-url", "origin"); err != nil {
-			add("FAIL", "origin", "origin remote unavailable; run `git remote add origin <url>`")
+		workspace := filepath.Join(o.Root, "workspaces", "repo-tl")
+		if err := o.Run(gitPath, "-C", workspace, "remote", "get-url", "origin"); err != nil {
+			add("FAIL", "origin", fmt.Sprintf("origin remote unavailable in Team Lead workspace %s; run `git -C %q remote add origin <url>`", workspace, workspace))
 		} else {
-			add("PASS", "origin", "origin remote found")
-			if err := o.Run(gitPath, "-C", o.Root, "ls-remote", "--exit-code", "origin", "HEAD"); err != nil {
-				add("FAIL", "origin", "remote authentication or connectivity failed; configure access, then run `git ls-remote origin HEAD`")
+			add("PASS", "origin", "origin remote found in Team Lead workspace "+workspace)
+			if err := o.Run(gitPath, "-C", workspace, "ls-remote", "--exit-code", "origin", "HEAD"); err != nil {
+				add("FAIL", "origin", "remote authentication or connectivity failed in Team Lead workspace "+workspace+"; configure access, then run `git -C \""+workspace+"\" ls-remote origin HEAD`")
 			} else {
-				add("PASS", "origin", "remote access passed")
+				add("PASS", "origin", "remote access passed in Team Lead workspace "+workspace)
 			}
 		}
 	}

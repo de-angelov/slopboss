@@ -68,3 +68,50 @@ func TestDoctorFailuresAreActionable(t *testing.T) {
 		}
 	}
 }
+
+func TestOriginProbesUseTeamLeadWorkspace(t *testing.T) {
+	o := fixture(t, false)
+	workspace := filepath.Join(o.Root, "workspaces", "repo-tl")
+	var gitCalls [][]string
+	o.Run = func(name string, args ...string) error {
+		if name == "/fake/tool" && len(args) > 0 && args[0] == "-C" {
+			gitCalls = append(gitCalls, append([]string(nil), args...))
+		}
+		return nil
+	}
+	findings := Check(o)
+	if len(gitCalls) != 2 {
+		t.Fatalf("expected two git probes, got %v", gitCalls)
+	}
+	for _, args := range gitCalls {
+		if len(args) < 3 || args[1] != workspace {
+			t.Errorf("git probe did not use Team Lead workspace %q: %v", workspace, args)
+		}
+	}
+	for _, f := range findings {
+		if f.Check == "origin" && f.Level == "FAIL" {
+			t.Fatalf("unexpected origin failure: %+v", f)
+		}
+	}
+}
+
+func TestMissingWorkspaceOriginIsActionable(t *testing.T) {
+	o := fixture(t, false)
+	workspace := filepath.Join(o.Root, "workspaces", "repo-tl")
+	o.Run = func(name string, args ...string) error {
+		if len(args) >= 4 && args[0] == "-C" && args[1] == workspace && args[2] == "remote" {
+			return errors.New("no origin")
+		}
+		return nil
+	}
+	findings := Check(o)
+	for _, f := range findings {
+		if f.Check == "origin" && f.Level == "FAIL" {
+			if !strings.Contains(f.Message, workspace) || !strings.Contains(f.Message, "git -C") || !strings.Contains(f.Message, "remote add origin") {
+				t.Fatalf("workspace origin failure is not actionable: %+v", f)
+			}
+			return
+		}
+	}
+	t.Fatal("expected missing workspace origin failure")
+}
