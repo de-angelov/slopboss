@@ -234,10 +234,16 @@ func UnblockedBlockedTask(tasks []Task) Task {
 // pass even when other ready work exists.
 func HasOrphanBlocker(tasks []Task) bool {
 	owners := map[string]bool{}
+	known := map[string]bool{}
+	for _, task := range tasks {
+		if task.ID != "" {
+			known[task.ID] = true
+		}
+	}
 	for _, t := range tasks {
 		for _, dep := range strings.Split(t.Dependencies, ",") {
 			dep = strings.TrimSpace(dep)
-			if dep != "" {
+			if dep != "" && dep != t.ID {
 				owners[dep] = true
 			}
 		}
@@ -261,6 +267,15 @@ func HasOrphanBlocker(tasks []Task) bool {
 		id := t.ID
 		if id == "" {
 			id = t.Title
+		}
+		// A blocked task with a recorded owning dependency is not orphaned.
+		// Prioritize that dependency rather than decomposing the blocked task.
+		for _, dep := range strings.Split(t.Dependencies, ",") {
+			dep = strings.TrimSpace(dep)
+			if dep != id && known[dep] {
+				owners[id] = true
+				break
+			}
 		}
 		if !owners[id] {
 			return true

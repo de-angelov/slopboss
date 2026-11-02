@@ -266,9 +266,14 @@ func reconcile(tasks []board.Task) {
 
 	// Orphan blockers take priority over grooming: a blocked task with no
 	// owning task stalls downstream work, so force a decomposition pass even
-	// when ready backlog work exists. The pass is throttled by the blocked set.
+	// when ready backlog work exists. Once that pass has ended, let unrelated
+	// ready work proceed even if the orphan remains unresolved.
 	if board.HasOrphanBlocker(tasks) && backlogTask != nil {
-		backlogTask = nil
+		orphanPass := decompositionTask(board.BlockedBacklogIDs(tasks, done))
+		lease, found := findControllerLease(durable, teamLeadRole)
+		if !found || lease.LeaseID != controllerLeaseID(teamLeadRole, orphanPass, orphanPass.Key) || lease.Terminal == nil {
+			backlogTask = nil
+		}
 	}
 
 	followUpTask, needsFollowUp := completionFollowUpTask()
