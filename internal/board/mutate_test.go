@@ -106,6 +106,46 @@ func TestSetArchivesWithRepeatedDoneSections(t *testing.T) {
 	}
 }
 
+func TestSetArchivesWithFiveTopLevelArchiveHeadings(t *testing.T) {
+	dir := t.TempDir()
+	withBoardFiles(t, dir)
+	writeBoard(t, config.BacklogFile, "# BACKLOG\n\n## Backlog\n\n### Archive DOG-04\nTask ID: DOG-04\nOwner: Unassigned\nStatus: Backlog\nBlocked by: DOG-03\n\nNew record survives.\n")
+	var archive strings.Builder
+	for i := 1; i <= 5; i++ {
+		archive.WriteString("# ARCHIVE snapshot\n\n## Done\n\n### Historical record ")
+		archive.WriteString(strings.Repeat("x", i))
+		archive.WriteString("\nTask ID: HIST-")
+		archive.WriteString(strings.Repeat("0", i))
+		archive.WriteString("\nOwner: Dev Agent 1\nStatus: Done\n\nHistorical body ")
+		archive.WriteString(strings.Repeat("x", i))
+		archive.WriteString(".\n\n")
+	}
+	writeBoard(t, config.ArchiveFile, archive.String())
+
+	got, err := Set("DOG-04", Update{File: "archive", Section: "Done", Owner: "Dev Agent 2", Status: "Done", ClearBlockedBy: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "DOG-04" || got.Section != "Done" || got.Status != "Done" || strings.Contains(got.Body, "Blocked by:") {
+		t.Fatalf("archived task = %#v", got)
+	}
+	gotArchive, err := os.ReadFile(config.ArchiveFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(gotArchive)
+	if strings.Count(text, "Task ID: DOG-04") != 1 {
+		t.Fatalf("task was not inserted exactly once:\n%s", text)
+	}
+	for i := 1; i <= 5; i++ {
+		id := "HIST-" + strings.Repeat("0", i)
+		body := "Historical body " + strings.Repeat("x", i) + "."
+		if !strings.Contains(text, "Task ID: "+id) || !strings.Contains(text, body) {
+			t.Fatalf("archive lost record %q or its body:\n%s", id, text)
+		}
+	}
+}
+
 func TestSetArchiveCollapsesIdenticalRecordsAndRejectsConflicts(t *testing.T) {
 	for _, conflicting := range []bool{false, true} {
 		t.Run(map[bool]string{false: "identical", true: "conflicting"}[conflicting], func(t *testing.T) {
