@@ -39,8 +39,8 @@ func TestCanRetryFailedSessionAfterDelayWithoutSideEffects(t *testing.T) {
 	}
 
 	// Recording a retry is the only thing that consumes the budget.
-	if got := recordFailedSessionRetryLocked(teamLeadRole, session.TaskKey); got != 1 {
-		t.Fatalf("recordFailedSessionRetryLocked = %d, want 1", got)
+	if got := recordTeamLeadSessionRetryLocked(session.TaskKey); got != 1 {
+		t.Fatalf("recordTeamLeadSessionRetryLocked = %d, want 1", got)
 	}
 	if failedSessionRetryCounts[key] != 1 {
 		t.Fatalf("retry count = %d, want 1", failedSessionRetryCounts[key])

@@ -340,7 +340,7 @@ func reconcile(tasks []board.Task) {
 	for role := range finished {
 		if _, stillDesired := desired[role]; !stillDesired {
 			if role == teamLeadRole {
-				delete(failedSessionRetryCounts, failedSessionRetryKey(role, finished[role].TaskKey))
+				clearTeamLeadSessionRetryLocked(finished[role].TaskKey)
 			}
 			delete(finished, role)
 		}
@@ -398,7 +398,7 @@ func reconcile(tasks []board.Task) {
 		finishedSession, alreadyFinished := finished[role]
 		if alreadyFinished && finishedSession.TaskKey != taskKey {
 			if role == teamLeadRole {
-				delete(failedSessionRetryCounts, failedSessionRetryKey(role, finishedSession.TaskKey))
+				clearTeamLeadSessionRetryLocked(finishedSession.TaskKey)
 			}
 			delete(finished, role)
 			alreadyFinished = false
@@ -441,7 +441,7 @@ func reconcile(tasks []board.Task) {
 		// Charge a retry only now that the launch is actually happening.
 		if canRetry && role == teamLeadRole {
 			mu.Lock()
-			retryCount := recordFailedSessionRetryLocked(role, taskKey)
+			retryCount := recordTeamLeadSessionRetryLocked(taskKey)
 			mu.Unlock()
 			logx.Event(
 				"retrying %s after failed session for same task (%d/%d)",
@@ -600,7 +600,7 @@ func idleAuditTask(now time.Time) board.Task {
 // canRetryFailedSessionLocked reports whether a failed session for the same task
 // is eligible to retry, along with the number of retries already consumed. It has
 // no side effects: the retry is only counted when a launch actually happens (see
-// recordFailedSessionRetryLocked), so a retry deferred by an active pause or a
+// recordTeamLeadSessionRetryLocked), so a retry deferred by an active pause or a
 // stale board entry is never charged. Callers must hold mu.
 func canRetryFailedSessionLocked(role string, session FinishedSession, now time.Time) (bool, int) {
 	// A decomposition pass can finish normally while leaving the same blocked
@@ -629,15 +629,18 @@ func canRetryFailedSessionLocked(role string, session FinishedSession, now time.
 	return true, 0
 }
 
-// recordFailedSessionRetryLocked consumes one retry for the task and returns the
+// recordTeamLeadSessionRetryLocked consumes one Team Lead retry and returns the
 // new count. Callers must hold mu.
-func recordFailedSessionRetryLocked(role string, taskKey string) int {
-	if role != teamLeadRole {
-		return 0
-	}
-	key := failedSessionRetryKey(role, taskKey)
+func recordTeamLeadSessionRetryLocked(taskKey string) int {
+	key := failedSessionRetryKey(teamLeadRole, taskKey)
 	failedSessionRetryCounts[key]++
 	return failedSessionRetryCounts[key]
+}
+
+// clearTeamLeadSessionRetryLocked clears the Team Lead-only retry count for a
+// finished synthetic task. Callers must hold mu.
+func clearTeamLeadSessionRetryLocked(taskKey string) {
+	delete(failedSessionRetryCounts, failedSessionRetryKey(teamLeadRole, taskKey))
 }
 
 func failedSessionRetryKey(role string, taskKey string) string {
