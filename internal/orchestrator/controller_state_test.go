@@ -178,3 +178,53 @@ func TestControllerTransitionPersistsNextRetryAttempt(t *testing.T) {
 		t.Fatalf("retry state was not persisted: got %#v", got.Leases[0])
 	}
 }
+
+func TestControllerStateStaleSnapshotRejectsConcurrentRoleAddition(t *testing.T) {
+	store := NewControllerStateStore(filepath.Join(t.TempDir(), "state.json"))
+	base := validControllerState()
+	base.Leases[0].Terminal = nil
+	if err := store.Commit(base); err != nil {
+		t.Fatalf("initial Commit() error = %v", err)
+	}
+
+	// Model two launch paths that both loaded the same snapshot before either
+	// wrote. Each complete candidate preserves the original lease and adds a
+	// different role.
+	teamLead := base
+	teamLead.Leases = append(append([]ControllerWorkerLease(nil), base.Leases...), ControllerWorkerLease{
+		Intent:  ControllerTaskIntent{TaskID: "TL-01", Role: "team-lead", Branch: "team-lead/01"},
+		LeaseID: "team-lead-lease", HeartbeatAt: base.Leases[0].HeartbeatAt, Attempt: 1,
+	})
+	devAgent3 := base
+	devAgent3.Leases = append(append([]ControllerWorkerLease(nil), base.Leases...), ControllerWorkerLease{
+		Intent:  ControllerTaskIntent{TaskID: "DEV-03", Role: "dev-agent-3", Branch: "agent/3/03"},
+		LeaseID: "dev-agent-3-lease", HeartbeatAt: base.Leases[0].HeartbeatAt, Attempt: 1,
+	})
+
+	if err := store.Commit(teamLead); err != nil {
+		t.Fatalf("first role Commit() error = %v", err)
+	}
+	if err := store.Commit(devAgent3); err == nil || !strings.Contains(err.Error(), `removes role lease "team-lead"`) {
+		t.Fatalf("stale role Commit() error = %v, want removal rejection", err)
+	}
+	afterRejection, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() after rejection: %v", err)
+	}
+	if len(afterRejection.Leases) != 2 || afterRejection.Leases[1].Intent.Role != "team-lead" {
+		t.Fatalf("rejected commit changed persisted state: %#v", afterRejection.Leases)
+	}
+
+	// Recovery is possible once the caller reloads and reapplies its role change.
+	devAgent3.Leases = append(append([]ControllerWorkerLease(nil), afterRejection.Leases...), devAgent3.Leases[1])
+	if err := store.Commit(devAgent3); err != nil {
+		t.Fatalf("reloaded role Commit() error = %v", err)
+	}
+	final, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() after recovery: %v", err)
+	}
+	if len(final.Leases) != 3 {
+		t.Fatalf("recovery persisted %d leases, want 3", len(final.Leases))
+	}
+}
