@@ -151,6 +151,60 @@ func TestControllerTransitionAtomicallyReplacesCompleteState(t *testing.T) {
 	}
 }
 
+func TestControllerStaleSnapshotsRejectIndependentRoleUpdates(t *testing.T) {
+	store := NewControllerStateStore(filepath.Join(t.TempDir(), "state.json"))
+	initial := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{
+		{Intent: ControllerTaskIntent{TaskID: "DOG-10", Role: "team-lead", Branch: "agent/tl/task"}, LeaseID: "team-lead-lease", HeartbeatAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Attempt: 1},
+		{Intent: ControllerTaskIntent{TaskID: "DOG-11", Role: "dev-agent-3", Branch: "agent/3/task"}, LeaseID: "dev-agent-3-lease", HeartbeatAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Attempt: 1},
+	}}
+	if err := store.Commit(initial); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two independent handlers load the same durable snapshot, then update
+	// different roles. Commit serializes writes but cannot refresh stale input.
+	teamLeadSnapshot, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	devAgentSnapshot, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamLeadSnapshot.Leases[0].HeartbeatAt = initial.Leases[0].HeartbeatAt.Add(time.Minute)
+	devAgentSnapshot.Leases[1].HeartbeatAt = initial.Leases[1].HeartbeatAt.Add(2 * time.Minute)
+
+	if err := store.Commit(teamLeadSnapshot); err != nil {
+		t.Fatalf("Team Lead update: %v", err)
+	}
+	if err := store.Commit(devAgentSnapshot); err == nil || !strings.Contains(err.Error(), "regresses heartbeat for role \"team-lead\"") {
+		t.Fatalf("stale Dev Agent update error = %v, want Team Lead heartbeat regression", err)
+	}
+
+	persisted, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !persisted.Leases[0].HeartbeatAt.Equal(teamLeadSnapshot.Leases[0].HeartbeatAt) ||
+		!persisted.Leases[1].HeartbeatAt.Equal(initial.Leases[1].HeartbeatAt) {
+		t.Fatalf("persisted state after stale rejection = %#v", persisted)
+	}
+
+	// Retrying from the newly committed snapshot preserves both role updates.
+	persisted.Leases[1].HeartbeatAt = initial.Leases[1].HeartbeatAt.Add(2 * time.Minute)
+	if err := store.Commit(persisted); err != nil {
+		t.Fatalf("Dev Agent retry from fresh snapshot: %v", err)
+	}
+	recovered, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !recovered.Leases[0].HeartbeatAt.Equal(teamLeadSnapshot.Leases[0].HeartbeatAt) ||
+		!recovered.Leases[1].HeartbeatAt.Equal(initial.Leases[1].HeartbeatAt.Add(2*time.Minute)) {
+		t.Fatalf("persisted state after refreshed retry = %#v", recovered)
+	}
+}
+
 func TestControllerTransitionPersistsNextRetryAttempt(t *testing.T) {
 	store := NewControllerStateStore(filepath.Join(t.TempDir(), "state.json"))
 	terminal := validControllerState()
