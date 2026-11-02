@@ -67,7 +67,7 @@ var boardCreateCmd = &cobra.Command{
 var (
 	setOwner, setBranch, setStatus, setCategory, setDependencies, setBlockedBy string
 	setClearBlockedBy                                                          bool
-	setFile, setSection                                                        string
+	setFile, setSection, setSourceSection                                      string
 )
 
 var boardSetCmd = &cobra.Command{
@@ -76,10 +76,11 @@ var boardSetCmd = &cobra.Command{
 	Long: `Update machine-owned task metadata without editing Markdown by hand.
 
 To move a task, pass both --file (backlog, tasks, or archive) and --section.
+When an ID is duplicated, pass --source-section to select its existing section.
 The task body is preserved.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		u := board.Update{Owner: setOwner, Branch: setBranch, Status: setStatus, Category: setCategory, Dependencies: setDependencies, BlockedBy: setBlockedBy, ClearBlockedBy: setClearBlockedBy, File: setFile, Section: setSection}
+		u := board.Update{Owner: setOwner, Branch: setBranch, Status: setStatus, Category: setCategory, Dependencies: setDependencies, BlockedBy: setBlockedBy, ClearBlockedBy: setClearBlockedBy, File: setFile, Section: setSection, SourceSection: setSourceSection}
 		if noBoardChanges(u) {
 			return fmt.Errorf("supply at least one field to update")
 		}
@@ -92,7 +93,7 @@ The task body is preserved.`,
 }
 
 func noBoardChanges(u board.Update) bool {
-	return strings.TrimSpace(u.Owner) == "" && strings.TrimSpace(u.Branch) == "" && strings.TrimSpace(u.Status) == "" && strings.TrimSpace(u.Category) == "" && strings.TrimSpace(u.Dependencies) == "" && strings.TrimSpace(u.BlockedBy) == "" && !u.ClearBlockedBy && strings.TrimSpace(u.File) == "" && strings.TrimSpace(u.Section) == ""
+	return strings.TrimSpace(u.Owner) == "" && strings.TrimSpace(u.Branch) == "" && strings.TrimSpace(u.Status) == "" && strings.TrimSpace(u.Category) == "" && strings.TrimSpace(u.Dependencies) == "" && strings.TrimSpace(u.BlockedBy) == "" && !u.ClearBlockedBy && strings.TrimSpace(u.File) == "" && strings.TrimSpace(u.Section) == "" && strings.TrimSpace(u.SourceSection) == ""
 }
 
 func writeJSON(value any) error {
@@ -114,6 +115,7 @@ func init() {
 	boardSetCmd.Flags().BoolVar(&setClearBlockedBy, "clear-blocked-by", false, "remove the Blocked by field")
 	boardSetCmd.Flags().StringVar(&setFile, "file", "", "destination: backlog, tasks, or archive")
 	boardSetCmd.Flags().StringVar(&setSection, "section", "", "destination section; requires --file")
+	boardSetCmd.Flags().StringVar(&setSourceSection, "source-section", "", "existing section containing the task; resolves duplicate IDs")
 	boardCreateCmd.Flags().StringVar(&createTitle, "title", "", "task title")
 	boardCreateCmd.Flags().StringVar(&createCategory, "category", "AFK", "AFK or HITL")
 	boardCreateCmd.Flags().StringVar(&createBranch, "branch", "none", "proposed task branch")

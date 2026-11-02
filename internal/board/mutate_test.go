@@ -43,6 +43,28 @@ Keep this body exactly.
 	}
 }
 
+func TestSetSelectsDuplicateIDBySourceSection(t *testing.T) {
+	dir := t.TempDir()
+	withBoardFiles(t, dir)
+	writeBoard(t, config.BacklogFile, "# BACKLOG\n\n## Backlog\n\n### Backlog copy\nTask ID: DUP-1\nOwner: Unassigned\nStatus: Backlog\n\nBacklog body.\n")
+	writeBoard(t, config.TasksFile, "# TASKS\n\n## Dev Agent 2 In Progress\n\n### Active copy\nTask ID: DUP-1\nOwner: Dev Agent 2\nStatus: In Progress\n\nActive body.\n")
+	if _, err := Set("DUP-1", Update{Owner: "Dev Agent 1"}); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ambiguous Set error = %v", err)
+	}
+	got, err := Set("DUP-1", Update{SourceSection: "Dev Agent 2 In Progress", Branch: "agent/2/dog-02"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Section != "Dev Agent 2 In Progress" || got.Branch != "agent/2/dog-02" || got.Owner != "Dev Agent 2" {
+		t.Fatalf("selected task = %#v", got)
+	}
+	backlog, _ := os.ReadFile(config.BacklogFile)
+	tasks, _ := os.ReadFile(config.TasksFile)
+	if !strings.Contains(string(backlog), "Backlog body.") || strings.Contains(string(backlog), "agent/2/dog-02") || !strings.Contains(string(tasks), "Active body.") || !strings.Contains(string(tasks), "agent/2/dog-02") {
+		t.Fatalf("wrong duplicate was changed\nbacklog:\n%s\ntasks:\n%s", backlog, tasks)
+	}
+}
+
 func TestSetMovesWholeTaskToExplicitLocation(t *testing.T) {
 	dir := t.TempDir()
 	withBoardFiles(t, dir)

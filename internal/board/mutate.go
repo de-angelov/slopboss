@@ -22,6 +22,7 @@ type Update struct {
 	ClearBlockedBy bool
 	File           string
 	Section        string
+	SourceSection  string
 }
 
 // CreateBacklogTask adds a fully specified, unassigned task to Backlog.
@@ -231,7 +232,7 @@ func Set(id string, update Update) (Task, error) {
 		return Task{}, err
 	}
 
-	sourcePath, source, err := findTaskSource(id)
+	sourcePath, source, err := findTaskSource(id, update.SourceSection)
 	if err != nil {
 		return Task{}, err
 	}
@@ -304,7 +305,21 @@ func Set(id string, update Update) (Task, error) {
 			return Task{}, err
 		}
 	}
-	return Get(id)
+	result := parseAllTasks(source.data, sourcePath)[id]
+	result = applyUpdateToTask(result, update)
+	if update.Branch != "" {
+		result.Branch = update.Branch
+	}
+	if update.Category != "" {
+		result.Category = strings.ToUpper(update.Category)
+	}
+	if update.Dependencies != "" {
+		result.Dependencies = update.Dependencies
+	}
+	if update.BlockedBy != "" {
+		result.BlockingTasks = update.BlockedBy
+	}
+	return result, nil
 }
 
 // removeIdenticalArchiveDuplicates collapses repeated serialized archive task
@@ -374,7 +389,11 @@ type taskSource struct {
 	start, end int
 }
 
-func findTaskSource(id string) (string, taskSource, error) {
+func findTaskSource(id string, sourceSection ...string) (string, taskSource, error) {
+	var matches []struct {
+		path   string
+		source taskSource
+	}
 	for _, path := range boardPaths() {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -382,11 +401,34 @@ func findTaskSource(id string) (string, taskSource, error) {
 		}
 		for _, block := range taskBlocks(string(data)) {
 			if metadataValue(block.text, "task id") == id {
-				return path, taskSource{data: string(data), block: block.text, start: block.start, end: block.end}, nil
+				section := sectionAt(string(data), block.start)
+				if len(sourceSection) == 0 || sourceSection[0] == "" || section == sourceSection[0] {
+					matches = append(matches, struct {
+						path   string
+						source taskSource
+					}{path, taskSource{data: string(data), block: block.text, start: block.start, end: block.end}})
+				}
 			}
 		}
 	}
+	if len(matches) == 1 {
+		return matches[0].path, matches[0].source, nil
+	}
+	if len(matches) > 1 {
+		return "", taskSource{}, fmt.Errorf("task %q is ambiguous; specify --source-section", id)
+	}
 	return "", taskSource{}, fmt.Errorf("task %q not found", id)
+}
+
+func sectionAt(data string, offset int) string {
+	section := ""
+	for _, line := range strings.Split(data[:offset], "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "## ") {
+			section = strings.TrimSpace(strings.TrimPrefix(line, "## "))
+		}
+	}
+	return section
 }
 
 func validateUpdate(u Update) error {
