@@ -3,6 +3,7 @@ package board
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -164,6 +165,44 @@ func TestSetArchiveCollapsesRecordsAcrossRepeatedArchiveSnapshotHeadings(t *test
 	}
 	if !strings.Contains(string(got), "Preserve this historical body.") || !strings.Contains(string(got), "TASK-snapshot-archive") {
 		t.Fatalf("archive did not retain history and new task:\n%s", got)
+	}
+}
+
+func TestSetArchivesWithFiveTopLevelHeadings(t *testing.T) {
+	dir := t.TempDir()
+	withBoardFiles(t, dir)
+	writeBoard(t, config.BacklogFile, "# BACKLOG\n\n## Backlog\n\n### Archive me\nTask ID: TASK-five-headings\nOwner: Unassigned\nStatus: Backlog\n\nNew record survives.\n")
+
+	var archive strings.Builder
+	for i := 1; i <= 5; i++ {
+		archive.WriteString("# ARCHIVE snapshot\n\n## Done\n\n### Historical record\n")
+		archive.WriteString("Task ID: HIST-")
+		archive.WriteString(strconv.Itoa(i))
+		archive.WriteString("\nOwner: Dev Agent 1\nStatus: Done\n\nHistorical body ")
+		archive.WriteString(strconv.Itoa(i))
+		archive.WriteString(".\n\n")
+	}
+	writeBoard(t, config.ArchiveFile, archive.String())
+
+	_, err := Set("TASK-five-headings", Update{File: "archive", Section: "Done", Owner: "Dev Agent 2", Status: "Done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(config.ArchiveFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for i := 1; i <= 5; i++ {
+		for _, want := range []string{"Task ID: HIST-" + strconv.Itoa(i), "Historical body " + strconv.Itoa(i) + "."} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("archive lost %q:\n%s", want, text)
+			}
+		}
+	}
+	if strings.Count(text, "Task ID: TASK-five-headings") != 1 {
+		t.Fatalf("moved task should appear exactly once:\n%s", text)
 	}
 }
 
