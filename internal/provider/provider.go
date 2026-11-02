@@ -256,16 +256,12 @@ func (claudeProvider) InteractiveCommand(ctx context.Context, model string, prom
 	return exec.CommandContext(ctx, "claude", args...)
 }
 
-func (claudeProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec) *exec.Cmd {
+func (p claudeProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec) *exec.Cmd {
 	// Claude runs headless with the same stream-json output the orchestrator uses,
 	// so claudeOutputMonitor parses token usage and the final message from it.
 	// Experiments run uncapped (real implementation work), and Profile/Config/
 	// LastMessageFile have no Claude equivalent, so they are ignored.
-	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"}
-	if spec.Model != "" {
-		args = append(args, "--model", spec.Model)
-	}
-	return newBackendCmd(ctx, "claude", args...)
+	return p.Command(ctx, spec.Model, 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -304,16 +300,12 @@ func (opencodeProvider) InteractiveCommand(ctx context.Context, model string, pr
 	return exec.CommandContext(ctx, "opencode", args...)
 }
 
-func (opencodeProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec) *exec.Cmd {
+func (p opencodeProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec) *exec.Cmd {
 	// OpenCode runs headless with the same JSON output the orchestrator uses, so
 	// opencodeOutputMonitor parses token usage and the final message from it.
 	// Profile/Config/LastMessageFile have no OpenCode equivalent and are ignored
 	// (final message comes from the event stream).
-	args := []string{"run", "--format", "json", "--auto"}
-	if spec.Model != "" {
-		args = append(args, "--model", spec.Model)
-	}
-	return newBackendCmd(ctx, "opencode", args...)
+	return p.Command(ctx, spec.Model, 0)
 }
 
 func (opencodeProvider) FetchUsage(ctx context.Context, sessionID string) (TokenBreakdown, error) {
@@ -390,10 +382,6 @@ func (agyProvider) InteractiveCommand(ctx context.Context, model string, prompt 
 	return exec.CommandContext(ctx, "agy", args...)
 }
 
-func (agyProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec) *exec.Cmd {
-	args := []string{"--output-format", "stream-json", "--dangerously-skip-permissions"}
-	if spec.Model != "" {
-		args = append(args, "--model", spec.Model)
-	}
-	return newBackendCmd(ctx, "agy", args...)
+func (p agyProvider) ExperimentCommand(ctx context.Context, spec ExperimentSpec) *exec.Cmd {
+	return p.Command(ctx, spec.Model, 0)
 }
