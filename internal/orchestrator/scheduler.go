@@ -98,15 +98,6 @@ func findControllerLease(state ControllerState, role string) (ControllerWorkerLe
 	return ControllerWorkerLease{}, false
 }
 
-// reconcileLeaseDecision is the durable-state gate used by reconcile before it
-// considers any process-local maps or launches. A recorded lease for the same
-// intent is authoritative across restart; a nonterminal prior lease for the
-// role is runtime evidence and also suppresses a second worker.
-func reconcileLeaseDecision(state ControllerState, role, leaseID string) (ControllerWorkerLease, bool) {
-	lease, launch, _ := recoveryLeaseDecision(state, role, leaseID)
-	return lease, launch
-}
-
 func recoveryLeaseDecision(state ControllerState, role, leaseID string) (ControllerWorkerLease, bool, string) {
 	lease, found := findControllerLease(state, role)
 	if !found {
@@ -683,10 +674,6 @@ func pauseLaunchesAfterUsageLimit(now time.Time) time.Time {
 
 	logx.Event("pausing launches after usage-limit error until %s", activeUntil.Format(time.RFC3339))
 	return activeUntil
-}
-
-func pauseCodexLaunchesAfterUsageLimit(now time.Time) time.Time {
-	return pauseLaunchesAfterUsageLimit(now)
 }
 
 // circuitKey returns the map key for a task's circuit breaker.

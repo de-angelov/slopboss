@@ -51,21 +51,6 @@ func TestReadTasksParsesCategory(t *testing.T) {
 	}
 }
 
-func TestAllDevAgentsBusy(t *testing.T) {
-	old := config.DevAgentCount
-	config.DevAgentCount = 2
-	t.Cleanup(func() { config.DevAgentCount = old })
-
-	desired := map[string]Task{config.DevAgentRole(1): {}}
-	if AllDevAgentsBusy(desired) {
-		t.Fatal("one of two agents free -> not all busy")
-	}
-	desired[config.DevAgentRole(2)] = Task{}
-	if !AllDevAgentsBusy(desired) {
-		t.Fatal("both agents busy -> all busy")
-	}
-}
-
 func TestFirstBacklogTaskPrefersAFKOverHITL(t *testing.T) {
 	tasks := []Task{
 		{Section: "Backlog", Title: "Human Admin Task", Status: "Backlog", Category: "HITL"},

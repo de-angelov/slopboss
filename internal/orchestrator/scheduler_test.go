@@ -68,12 +68,12 @@ func TestRecoveryPolicyRecognizesTransientAndAmbiguousResults(t *testing.T) {
 func TestExpiredLeaseIsRetryableAndSameLiveLeaseIsNot(t *testing.T) {
 	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{Role: devAgent1Role}, LeaseID: "id", HeartbeatAt: time.Now().Add(-11 * time.Minute), Attempt: 1}
 	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
-	if _, launch := reconcileLeaseDecision(state, devAgent1Role, "id"); !launch {
+	if _, launch, _ := recoveryLeaseDecision(state, devAgent1Role, "id"); !launch {
 		t.Fatal("expired lease should be recovered")
 	}
 	lease.HeartbeatAt = time.Now()
 	state.Leases[0] = lease
-	if _, launch := reconcileLeaseDecision(state, devAgent1Role, "id"); launch {
+	if _, launch, _ := recoveryLeaseDecision(state, devAgent1Role, "id"); launch {
 		t.Fatal("live lease should suppress duplicate launch")
 	}
 }
@@ -81,7 +81,7 @@ func TestExpiredLeaseIsRetryableAndSameLiveLeaseIsNot(t *testing.T) {
 func TestRecoveryRetryCountComesFromDurableAttempt(t *testing.T) {
 	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{Role: devAgent1Role}, LeaseID: "id", Attempt: config.MaxFailedSessionRetries + 1, HeartbeatAt: time.Now(), Terminal: &ControllerTerminalResult{Outcome: string(sessionFailed), FinishedAt: time.Now(), Evidence: "transient"}}
 	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
-	got, retry := reconcileLeaseDecision(state, devAgent1Role, "id")
+	got, retry, _ := recoveryLeaseDecision(state, devAgent1Role, "id")
 	if retry || got.Attempt != config.MaxFailedSessionRetries+1 {
 		t.Fatalf("durable exhaustion decision = %#v, launch %v", got, retry)
 	}
@@ -285,7 +285,7 @@ func TestNonUsageLimitedSessionsDoNotUseUsageLimitResume(t *testing.T) {
 func TestCodexLaunchPauseAfterUsageLimit(t *testing.T) {
 	withRetryTestState(t)
 	now := time.Now()
-	until := pauseCodexLaunchesAfterUsageLimit(now)
+	until := pauseLaunchesAfterUsageLimit(now)
 
 	paused, activeUntil := codexLaunchPaused(now.Add(time.Minute))
 	if !paused {
@@ -467,7 +467,7 @@ func TestReconcileRestartKeepsRecordedLease(t *testing.T) {
 	mu.Lock()
 	running = map[string]RunningSession{}
 	mu.Unlock()
-	if _, launch := reconcileLeaseDecision(loaded, devAgent1Role, controllerLeaseID(devAgent1Role, task, task.Key)); launch {
+	if _, launch, _ := recoveryLeaseDecision(loaded, devAgent1Role, controllerLeaseID(devAgent1Role, task, task.Key)); launch {
 		t.Fatal("reconciliation would launch a duplicate for the recorded intent")
 	}
 	// Reapplying unchanged intent replaces the same role lease, it cannot append

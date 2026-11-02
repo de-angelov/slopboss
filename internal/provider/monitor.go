@@ -160,12 +160,6 @@ func (w *codexOutputMonitor) tokenTotalLocked() int {
 	return w.sessionTokenTotal
 }
 
-func (w *codexOutputMonitor) TokenTotal() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.tokenTotalLocked()
-}
-
 func (w *codexOutputMonitor) Breakdown() TokenBreakdown {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -456,17 +450,6 @@ func (w *opencodeOutputMonitor) Breakdown() TokenBreakdown {
 	return w.usage
 }
 
-func (w *opencodeOutputMonitor) TokenTotal() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if strings.TrimSpace(w.line) != "" {
-		w.consumeLineLocked(w.line)
-		w.line = ""
-	}
-	return w.usage.Total
-}
-
 func (w *opencodeOutputMonitor) UsageLimited() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -663,17 +646,6 @@ func (w *agyOutputMonitor) Breakdown() TokenBreakdown {
 		w.line = ""
 	}
 	return w.usage
-}
-
-func (w *agyOutputMonitor) TokenTotal() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if strings.TrimSpace(w.line) != "" {
-		w.consumeLineLocked(w.line)
-		w.line = ""
-	}
-	return w.usage.Total
 }
 
 func (w *agyOutputMonitor) UsageLimited() bool {

@@ -243,14 +243,14 @@ func TestCodexOutputMonitorParsesTokenUsage(t *testing.T) {
 	if _, err := writer.Write([]byte("some output\ntokens used\n")); err != nil {
 		t.Fatal(err)
 	}
-	if writer.TokenTotal() != 0 {
+	if writer.Breakdown().Total != 0 {
 		t.Fatal("token total should wait for the line after marker")
 	}
 
 	if _, err := writer.Write([]byte("35,814\n")); err != nil {
 		t.Fatal(err)
 	}
-	if got := writer.TokenTotal(); got != 35814 {
+	if got := writer.Breakdown().Total; got != 35814 {
 		t.Fatalf("token total = %d, want 35814", got)
 	}
 }
@@ -289,8 +289,8 @@ func TestCodexOutputMonitorParsesJSONTokenUsage(t *testing.T) {
 	if got.Total != 346172 { // input + output summed across turns
 		t.Fatalf("total = %d, want 346172", got.Total)
 	}
-	if writer.TokenTotal() != 346172 {
-		t.Fatalf("token total = %d, want 346172", writer.TokenTotal())
+	if writer.Breakdown().Total != 346172 {
+		t.Fatalf("token total = %d, want 346172", writer.Breakdown().Total)
 	}
 }
 

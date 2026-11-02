@@ -104,18 +104,6 @@ func FirstBacklogTask(tasks []Task) Task {
 	return firstReady
 }
 
-// AllDevAgentsBusy reports whether every configured dev-agent lane already has
-// desired work (so the Team Lead should not be handed a backlog task). With zero
-// configured agents this is vacuously true.
-func AllDevAgentsBusy(desired map[string]Task) bool {
-	for k := 1; k <= config.DevAgentCount; k++ {
-		if _, busy := desired[config.DevAgentRole(k)]; !busy {
-			return false
-		}
-	}
-	return true
-}
-
 // BlockedBacklogIDs returns the IDs of pending backlog tasks whose dependencies
 // are not all completed, plus any task explicitly marked Status: Blocked. Sorted
 // so it forms a stable key: a decomposition pass is throttled to run once per
