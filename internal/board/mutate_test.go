@@ -74,6 +74,38 @@ func TestSetMovesWholeTaskToExplicitLocation(t *testing.T) {
 	}
 }
 
+func TestSetArchivesWithRepeatedDoneSections(t *testing.T) {
+	dir := t.TempDir()
+	withBoardFiles(t, dir)
+	writeBoard(t, config.BacklogFile, "# BACKLOG\n\n## Backlog\n\n### Archive me\nTask ID: TASK-repeat-done\nOwner: Unassigned\nStatus: Backlog\n\nNew record survives.\n")
+	archive := "# ARCHIVE\n\n## Done\n\n### Earlier record\nTask ID: TASK-earlier\nOwner: Dev Agent 2\nStatus: Done\n\nEarlier body.\n\n## Done\n\n### Another record\nTask ID: TASK-another\nOwner: Dev Agent 1\nStatus: Done\n\nAnother body.\n"
+	writeBoard(t, config.ArchiveFile, archive)
+
+	got, err := Set("TASK-repeat-done", Update{File: "archive", Section: "Done", Owner: "Dev Agent 1", Status: "Done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Section != "Done" || got.Status != "Done" {
+		t.Fatalf("archived task metadata = %#v", got)
+	}
+	gotArchive, err := os.ReadFile(config.ArchiveFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(gotArchive)
+	for _, want := range []string{"TASK-earlier", "Earlier body.", "TASK-another", "Another body.", "TASK-repeat-done", "New record survives.", "Status: Done"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("archive lost %q:\n%s", want, text)
+		}
+	}
+	if strings.Count(text, "Task ID: TASK-repeat-done") != 1 {
+		t.Fatalf("new archive record was not inserted exactly once:\n%s", text)
+	}
+	if _, err := ValidateLifecycle(got, "archive"); err != nil {
+		t.Fatalf("archived task has invalid lifecycle: %v", err)
+	}
+}
+
 func TestSetMovesTaskWithinDocument(t *testing.T) {
 	dir := t.TempDir()
 	withBoardFiles(t, dir)
