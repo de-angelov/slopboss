@@ -506,7 +506,7 @@ func validateWholeDocument(data, file string) error {
 			sections[section] = true
 		}
 	}
-	if top != 1 {
+	if (file != "archive" && top != 1) || (file == "archive" && top < 1) {
 		return fmt.Errorf("board document must contain exactly one top-level heading (found %d)", top)
 	}
 	seen := map[string]bool{}
