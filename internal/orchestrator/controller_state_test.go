@@ -178,3 +178,52 @@ func TestControllerTransitionPersistsNextRetryAttempt(t *testing.T) {
 		t.Fatalf("retry state was not persisted: got %#v", got.Leases[0])
 	}
 }
+
+func TestControllerConcurrentRoleSnapshotsRejectStaleSecondCommit(t *testing.T) {
+	store := NewControllerStateStore(filepath.Join(t.TempDir(), "state.json"))
+	base := ControllerState{Version: ControllerStateVersion}
+	if err := store.Commit(base); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	lease := func(role, taskID string) ControllerWorkerLease {
+		return ControllerWorkerLease{
+			Intent: ControllerTaskIntent{TaskID: taskID, Role: role, Branch: "agent/" + taskID},
+			LeaseID: "lease-" + taskID, HeartbeatAt: now, Attempt: 1,
+		}
+	}
+	// Both launch paths read the same empty snapshot before either commit.
+	teamLeadCandidate := base
+	teamLeadCandidate.Leases = []ControllerWorkerLease{lease(teamLeadRole, "DOG-TL")}
+	dev3Candidate := base
+	dev3Candidate.Leases = []ControllerWorkerLease{lease("dev-agent-3", "DOG-D3")}
+	if err := store.Commit(teamLeadCandidate); err != nil {
+		t.Fatalf("Team Lead launch commit: %v", err)
+	}
+	if err := store.Commit(dev3Candidate); err == nil || !strings.Contains(err.Error(), "removes role lease") {
+		t.Fatalf("stale Dev Agent 3 snapshot error = %v, want removal rejection", err)
+	}
+
+	persisted, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Leases) != 1 || persisted.Leases[0].Intent.Role != teamLeadRole {
+		t.Fatalf("rejected commit changed persisted state: %#v", persisted)
+	}
+
+	// A retry that reloads and merges the durable lease succeeds.
+	retry, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry.Leases = append(retry.Leases, dev3Candidate.Leases[0])
+	if err := store.Commit(retry); err != nil {
+		t.Fatalf("Dev Agent 3 reload-and-merge retry: %v", err)
+	}
+	persisted, err = store.Load()
+	if err != nil || len(persisted.Leases) != 2 {
+		t.Fatalf("state after retry = %#v, err=%v; want both role leases", persisted, err)
+	}
+}
