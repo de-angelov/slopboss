@@ -178,3 +178,51 @@ func TestControllerTransitionPersistsNextRetryAttempt(t *testing.T) {
 		t.Fatalf("retry state was not persisted: got %#v", got.Leases[0])
 	}
 }
+
+// This models two launch paths that both load the same snapshot before either
+// writes. The store rejects the stale second candidate without losing the
+// first lease; rebuilding it from the latest snapshot allows the added role.
+func TestControllerStaleLaunchSnapshotRejectsThenRecovers(t *testing.T) {
+	store := NewControllerStateStore(filepath.Join(t.TempDir(), "state.json"))
+	base := ControllerState{Version: ControllerStateVersion}
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	lease := func(task, role string) ControllerWorkerLease {
+		return ControllerWorkerLease{
+			Intent: ControllerTaskIntent{TaskID: task, Role: role, Branch: "branch/" + task},
+			LeaseID: "lease-" + task, HeartbeatAt: now, Attempt: 1,
+		}
+	}
+	teamLeadCandidate := base
+	teamLeadCandidate.Leases = []ControllerWorkerLease{lease("lead-task", teamLeadRole)}
+	devCandidate := base
+	devCandidate.Leases = []ControllerWorkerLease{lease("dev-task", "dev-agent-3")}
+
+	if err := store.Commit(teamLeadCandidate); err != nil {
+		t.Fatalf("commit Team Lead lease: %v", err)
+	}
+	if err := store.Commit(devCandidate); err == nil || !strings.Contains(err.Error(), "removes role lease") {
+		t.Fatalf("stale Dev Agent 3 snapshot error = %v, want removed-role rejection", err)
+	}
+
+	persisted, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Leases) != 1 || persisted.Leases[0].Intent.Role != teamLeadRole {
+		t.Fatalf("rejected candidate changed persisted state: %#v", persisted.Leases)
+	}
+
+	// A launch retry that reloads and extends the committed snapshot succeeds.
+	devCandidate = persisted
+	devCandidate.Leases = append(devCandidate.Leases, lease("dev-task", "dev-agent-3"))
+	if err := store.Commit(devCandidate); err != nil {
+		t.Fatalf("commit reloaded Dev Agent 3 lease: %v", err)
+	}
+	persisted, err = store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Leases) != 2 {
+		t.Fatalf("recovered state has %d leases, want 2: %#v", len(persisted.Leases), persisted.Leases)
+	}
+}
