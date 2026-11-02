@@ -32,6 +32,7 @@ var (
 	sessionProvider provider.Provider = mustCodex()
 
 	mu                        sync.Mutex
+	controllerMu              sync.Mutex
 	running                   = map[string]RunningSession{}
 	finished                  = map[string]FinishedSession{}
 	failedSessionRetryCounts  = map[string]int{}

@@ -74,6 +74,11 @@ func startSession(role string, task board.Task, taskKey string, tasks []board.Ta
 	go func() {
 		outcome := sessionUnknown
 		defer func() {
+			if outcome != sessionUnknown {
+				if err := reportSessionTerminal(leaseID, outcome, role, taskKey); err != nil {
+					logx.Event("cannot report %s terminal result: %v", role, err)
+				}
+			}
 			mu.Lock()
 			delete(running, role)
 			delete(cancelPendingSince, role)
@@ -84,11 +89,6 @@ func startSession(role string, task board.Task, taskKey string, tasks []board.Ta
 				recordCircuitResultLocked(circuitKey(role, taskKey), outcome == sessionCompleted, time.Now())
 			}
 			mu.Unlock()
-			if outcome != sessionCancelled && outcome != sessionUnknown {
-				if err := reportSessionTerminal(leaseID, outcome, role, taskKey); err != nil {
-					logx.Event("cannot report %s terminal result: %v", role, err)
-				}
-			}
 		}()
 
 		switch {

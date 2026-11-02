@@ -47,7 +47,9 @@ func RunLoop(parent context.Context, providerName string, ui UI) error {
 	}()
 
 	// Reconcile loop: poll the board and converge sessions on PollInterval.
+	reconcileDone := make(chan struct{})
 	go func() {
+		defer close(reconcileDone)
 		ticker := time.NewTicker(config.PollInterval)
 		defer ticker.Stop()
 		for {
@@ -110,6 +112,7 @@ func RunLoop(parent context.Context, providerName string, ui UI) error {
 	runErr := ui.Run()
 
 	stop() // wind down the loop goroutines
+	<-reconcileDone
 	logx.Event("shutting down; stopping running sessions")
 	shutdownSessions()
 	logx.Event("orchestrator stopped")

@@ -30,6 +30,8 @@ func commitControllerState(state ControllerState) error { return controllerState
 // reportSessionTerminal accepts worker execution evidence as a controller
 // event. Only this controller-side handler changes the durable lease snapshot.
 func reportSessionTerminal(leaseID string, outcome SessionOutcome, role, taskKey string) error {
+	controllerMu.Lock()
+	defer controllerMu.Unlock()
 	state, err := loadControllerState()
 	if err != nil {
 		return err
@@ -103,8 +105,8 @@ func recoveryLeaseDecision(state ControllerState, role, leaseID string) (Control
 	if !found {
 		return ControllerWorkerLease{}, true, ""
 	}
-	if lease.LeaseID == leaseID && lease.Terminal == nil && time.Since(lease.HeartbeatAt) >= 10*time.Minute {
-		return lease, true, ""
+	if lease.Terminal == nil && time.Since(lease.HeartbeatAt) >= 10*time.Minute {
+		return lease, false, "Blocked: expired worker lease has no terminal evidence; verify worker stopped before recovery"
 	}
 	if lease.LeaseID == leaseID && lease.Terminal != nil {
 		if retryableDurableResult(lease) {
@@ -212,6 +214,8 @@ type desiredSession struct {
 }
 
 func reconcile(tasks []board.Task) {
+	controllerMu.Lock()
+	defer controllerMu.Unlock()
 	durable, err := loadControllerState()
 	if err != nil {
 		logx.Event("cannot load controller state; refusing launches: %v", err)
@@ -356,7 +360,6 @@ func reconcile(tasks []board.Task) {
 		case cancelNow:
 			logx.Event("stopping %s because board files changed", role)
 			session.Cancel()
-			delete(running, role)
 			delete(cancelPendingSince, role)
 		}
 	}
@@ -365,6 +368,12 @@ func reconcile(tasks []board.Task) {
 	for role, desiredSession := range desired {
 		task := desiredSession.Task
 		taskKey := desiredSession.TaskKey
+		mu.Lock()
+		_, active := running[role]
+		mu.Unlock()
+		if active {
+			continue
+		}
 		leaseID := controllerLeaseID(role, task, taskKey)
 		lease, shouldLaunch, recoveryReason := recoveryLeaseDecision(durable, role, leaseID)
 		if recoveryReason != "" {
@@ -454,6 +463,7 @@ func reconcile(tasks []board.Task) {
 			logx.Event("cannot record %s lease; refusing launch: %v", role, err)
 			continue
 		}
+		durable.Leases = replaceControllerLease(durable.Leases, newLease)
 		launchControllerSession(role, task, taskKey, tasks, leaseID)
 		if role == teamLeadRole {
 			mu.Lock()

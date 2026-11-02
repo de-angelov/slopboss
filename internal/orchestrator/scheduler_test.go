@@ -65,11 +65,14 @@ func TestRecoveryPolicyRecognizesTransientAndAmbiguousResults(t *testing.T) {
 	}
 }
 
-func TestExpiredLeaseIsRetryableAndSameLiveLeaseIsNot(t *testing.T) {
+func TestExpiredLeaseRequiresReviewAndSameLiveLeaseIsNotRetried(t *testing.T) {
 	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{Role: devAgent1Role}, LeaseID: "id", HeartbeatAt: time.Now().Add(-11 * time.Minute), Attempt: 1}
 	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
-	if _, launch, _ := recoveryLeaseDecision(state, devAgent1Role, "id"); !launch {
-		t.Fatal("expired lease should be recovered")
+	if _, launch, reason := recoveryLeaseDecision(state, devAgent1Role, "id"); launch || !strings.Contains(reason, "no terminal evidence") {
+		t.Fatalf("expired lease must require review: launch=%v reason=%q", launch, reason)
+	}
+	if _, launch, reason := recoveryLeaseDecision(state, devAgent1Role, "new-task"); launch || !strings.Contains(reason, "no terminal evidence") {
+		t.Fatalf("expired lease must prevent a different task: launch=%v reason=%q", launch, reason)
 	}
 	lease.HeartbeatAt = time.Now()
 	state.Leases[0] = lease
@@ -716,17 +719,8 @@ func TestDurableLoopFailureModes(t *testing.T) {
 			}
 			if mode == "worker lost after lease acquisition" {
 				lost, launch, reason := recoveryLeaseDecision(state, devAgent1Role, state.Leases[0].LeaseID)
-				if !launch || reason != "" || lost.Attempt != 1 {
-					t.Fatalf("expired lease recovery decision = %#v, launch=%v reason=%q", lost, launch, reason)
-				}
-				reacquired := lost
-				reacquired.Attempt++
-				reacquired.HeartbeatAt = now
-				// Model the state snapshot after the reacquisition commit, then
-				// restart against that live lease and prove it suppresses a duplicate.
-				state.Leases[0] = reacquired
-				if got, retry, why := recoveryLeaseDecision(state, devAgent1Role, reacquired.LeaseID); retry || why != "" || got.Attempt != 2 {
-					t.Fatalf("reacquired durable lease permits duplicate: %#v launch=%v reason=%q", got, retry, why)
+				if launch || !strings.Contains(reason, "no terminal evidence") || lost.Attempt != 1 {
+					t.Fatalf("expired lease must require review: %#v, launch=%v reason=%q", lost, launch, reason)
 				}
 				return
 			}
