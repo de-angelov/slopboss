@@ -65,6 +65,39 @@ func TestSetSelectsDuplicateIDBySourceSection(t *testing.T) {
 	}
 }
 
+func TestReconcileDuplicatePreservesSelectedIdenticalRecord(t *testing.T) {
+	dir := t.TempDir()
+	withBoardFiles(t, dir)
+	record := "### Shared task\nTask ID: DUP-SAFE\nOwner: Unassigned\nStatus: Backlog\n\nThe prose survives.\n"
+	writeBoard(t, config.BacklogFile, "# BACKLOG\n\n## Backlog\n\n"+record)
+	writeBoard(t, config.TasksFile, "# TASKS\n\n## Blocked Tasks\n\n"+record)
+	if _, err := ReconcileDuplicate("DUP-SAFE", "Blocked Tasks"); err != nil {
+		t.Fatal(err)
+	}
+	backlog, _ := os.ReadFile(config.BacklogFile)
+	tasks, _ := os.ReadFile(config.TasksFile)
+	if strings.Contains(string(backlog), "DUP-SAFE") || strings.Count(string(tasks), "DUP-SAFE") != 1 || !strings.Contains(string(tasks), "The prose survives.") {
+		t.Fatalf("reconciliation did not preserve selected record\nbacklog:\n%s\ntasks:\n%s", backlog, tasks)
+	}
+}
+
+func TestReconcileDuplicateRejectsDifferentContentWithoutChanges(t *testing.T) {
+	dir := t.TempDir()
+	withBoardFiles(t, dir)
+	writeBoard(t, config.BacklogFile, "# BACKLOG\n\n## Backlog\n\n### Copy\nTask ID: DUP-CONFLICT\nOwner: Unassigned\nStatus: Backlog\n\nOriginal prose.\n")
+	writeBoard(t, config.TasksFile, "# TASKS\n\n## Blocked Tasks\n\n### Copy\nTask ID: DUP-CONFLICT\nOwner: Unassigned\nStatus: Backlog\n\nDifferent prose.\n")
+	backlog, _ := os.ReadFile(config.BacklogFile)
+	tasks, _ := os.ReadFile(config.TasksFile)
+	if _, err := ReconcileDuplicate("DUP-CONFLICT", "Blocked Tasks"); err == nil || !strings.Contains(err.Error(), "conflicting duplicate") {
+		t.Fatalf("expected safe conflict error, got %v", err)
+	}
+	afterBacklog, _ := os.ReadFile(config.BacklogFile)
+	afterTasks, _ := os.ReadFile(config.TasksFile)
+	if string(backlog) != string(afterBacklog) || string(tasks) != string(afterTasks) {
+		t.Fatal("documents changed after conflicting reconciliation")
+	}
+}
+
 func TestSetMovesWholeTaskToExplicitLocation(t *testing.T) {
 	dir := t.TempDir()
 	withBoardFiles(t, dir)

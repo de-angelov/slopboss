@@ -13,16 +13,104 @@ import (
 // board command. Empty fields mean "leave unchanged"; ClearBlockedBy explicitly
 // removes a resolved blocker.
 type Update struct {
-	Owner          string
-	Branch         string
-	Status         string
-	Category       string
-	Dependencies   string
-	BlockedBy      string
-	ClearBlockedBy bool
-	File           string
-	Section        string
-	SourceSection  string
+	Owner              string
+	Branch             string
+	Status             string
+	Category           string
+	Dependencies       string
+	BlockedBy          string
+	ClearBlockedBy     bool
+	File               string
+	Section            string
+	SourceSection      string
+	ReconcileDuplicate bool
+}
+
+// ReconcileDuplicate removes redundant copies only when every matching record
+// has identical task content. sourceSection identifies the copy to preserve.
+func ReconcileDuplicate(id, sourceSection string) (Task, error) {
+	id, sourceSection = strings.TrimSpace(id), strings.TrimSpace(sourceSection)
+	if id == "" || sourceSection == "" {
+		return Task{}, fmt.Errorf("task ID and --source-section are required to reconcile duplicates")
+	}
+	type found struct {
+		path, data string
+		span       blockSpan
+		section    string
+	}
+	var matches []found
+	for _, path := range boardPaths() {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return Task{}, err
+		}
+		data := string(b)
+		for _, span := range taskBlocks(data) {
+			if metadataValue(span.text, "task id") == id {
+				matches = append(matches, found{path, data, span, sectionAt(data, span.start)})
+			}
+		}
+	}
+	if len(matches) < 2 {
+		return Task{}, fmt.Errorf("task %q has no duplicate records to reconcile", id)
+	}
+	keeper := -1
+	for i, m := range matches {
+		if m.section == sourceSection {
+			if keeper >= 0 {
+				return Task{}, fmt.Errorf("task %q is ambiguous in section %q", id, sourceSection)
+			}
+			keeper = i
+		}
+	}
+	if keeper < 0 {
+		return Task{}, fmt.Errorf("task %q has no record in section %q", id, sourceSection)
+	}
+	want := strings.TrimSpace(matches[keeper].span.text)
+	for _, m := range matches {
+		if strings.TrimSpace(m.span.text) != want {
+			return Task{}, fmt.Errorf("cannot reconcile conflicting duplicate task ID %q", id)
+		}
+	}
+	changed := map[string]string{}
+	originals := map[string]string{}
+	for _, m := range matches {
+		originals[m.path] = m.data
+	}
+	for _, path := range boardPaths() {
+		data := originals[path]
+		spans := taskBlocks(data)
+		var out strings.Builder
+		cursor := 0
+		removed := false
+		for _, span := range spans {
+			if metadataValue(span.text, "task id") == id && !(path == matches[keeper].path && span.start == matches[keeper].span.start) {
+				out.WriteString(data[cursor:span.start])
+				cursor = span.end
+				removed = true
+			}
+		}
+		if removed {
+			out.WriteString(data[cursor:])
+			changed[path] = out.String()
+		}
+	}
+	for path, data := range changed {
+		if err := validateWholeDocument(data, boardFileName(path)); err != nil {
+			return Task{}, err
+		}
+	}
+	written := []string{}
+	for path, data := range changed {
+		if err := writeAtomic(path, data); err != nil {
+			for _, p := range written {
+				_ = writeAtomic(p, originals[p])
+			}
+			return Task{}, err
+		}
+		written = append(written, path)
+	}
+	return parseAllTasks(matches[keeper].data, matches[keeper].path)[id], nil
 }
 
 // CreateBacklogTask adds a fully specified, unassigned task to Backlog.
