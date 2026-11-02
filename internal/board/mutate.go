@@ -506,7 +506,10 @@ func validateWholeDocument(data, file string) error {
 			sections[section] = true
 		}
 	}
-	if top != 1 {
+	// Archive snapshots can be concatenated, leaving more than one document
+	// heading. Their task records remain valid and serialized moves should still
+	// append to the first Done section. Active board documents stay singular.
+	if top != 1 && file != "archive" {
 		return fmt.Errorf("board document must contain exactly one top-level heading (found %d)", top)
 	}
 	seen := map[string]bool{}
