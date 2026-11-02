@@ -178,3 +178,62 @@ func TestControllerTransitionPersistsNextRetryAttempt(t *testing.T) {
 		t.Fatalf("retry state was not persisted: got %#v", got.Leases[0])
 	}
 }
+
+func TestControllerTransitionRejectsStaleConcurrentSnapshotAndRecovers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	firstWriter := NewControllerStateStore(path)
+	secondWriter := NewControllerStateStore(path)
+	empty := ControllerState{Version: ControllerStateVersion}
+	if err := firstWriter.Commit(empty); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both writers read the same committed snapshot before either proposes a
+	// lease, as can happen when separate controller processes share the file.
+	firstSnapshot, err := firstWriter.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondSnapshot, err := secondWriter.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := func(role, taskID string) ControllerWorkerLease {
+		return ControllerWorkerLease{
+			Intent:  ControllerTaskIntent{TaskID: taskID, Role: role, Branch: "agent/" + role},
+			LeaseID: "lease-" + role, HeartbeatAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Attempt: 1,
+		}
+	}
+	teamLead := lease(teamLeadRole, "lead-task")
+	devAgent := lease("dev-agent-3", "agent-task")
+	firstSnapshot.Leases = append(firstSnapshot.Leases, teamLead)
+	secondSnapshot.Leases = append(secondSnapshot.Leases, devAgent)
+
+	if err := firstWriter.Commit(firstSnapshot); err != nil {
+		t.Fatalf("first writer commit: %v", err)
+	}
+	if err := secondWriter.Commit(secondSnapshot); err == nil || !strings.Contains(err.Error(), "removes role lease") {
+		t.Fatalf("stale second writer error = %v, want removed-role transition rejection", err)
+	}
+	got, err := secondWriter.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Leases) != 1 || got.Leases[0].Intent.Role != teamLeadRole {
+		t.Fatalf("persisted state after rejection = %#v, want only Team Lead lease", got.Leases)
+	}
+
+	// A retry based on the current snapshot preserves the first lease and adds
+	// the previously rejected lane.
+	got.Leases = append(got.Leases, devAgent)
+	if err := secondWriter.Commit(got); err != nil {
+		t.Fatalf("fresh-snapshot recovery commit: %v", err)
+	}
+	got, err = firstWriter.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Leases) != 2 {
+		t.Fatalf("persisted recovered state has %d leases, want 2", len(got.Leases))
+	}
+}
