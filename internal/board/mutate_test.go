@@ -106,6 +106,43 @@ func TestSetArchivesWithRepeatedDoneSections(t *testing.T) {
 	}
 }
 
+func TestSetArchiveCollapsesIdenticalRecordsAndRejectsConflicts(t *testing.T) {
+	for _, conflicting := range []bool{false, true} {
+		t.Run(map[bool]string{false: "identical", true: "conflicting"}[conflicting], func(t *testing.T) {
+			dir := t.TempDir()
+			withBoardFiles(t, dir)
+			source := "# BACKLOG\n\n## Backlog\n\n### Archive me\nTask ID: TASK-new-archive\nOwner: Unassigned\nStatus: Backlog\n\nNew body.\n"
+			duplicate := "### Historical\nTask ID: LOOP-03\nOwner: Dev Agent 1\nStatus: Done\n\nHistorical body.\n"
+			archive := "# ARCHIVE\n\n## Done\n\n" + duplicate + "\n"
+			if conflicting {
+				archive += strings.Replace(duplicate, "Historical body.", "Different body.", 1)
+			} else {
+				archive += duplicate
+			}
+			writeBoard(t, config.BacklogFile, source)
+			writeBoard(t, config.ArchiveFile, archive)
+
+			_, err := Set("TASK-new-archive", Update{File: "archive", Section: "Done", Owner: "Dev Agent 2", Status: "Done"})
+			got, _ := os.ReadFile(config.ArchiveFile)
+			if conflicting {
+				if err == nil || !strings.Contains(err.Error(), "conflicting duplicate task ID") {
+					t.Fatalf("Set error = %v, want conflicting duplicate rejection", err)
+				}
+				if string(got) != archive {
+					t.Fatalf("archive changed on rejection:\n%s", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Count(string(got), "Task ID: LOOP-03") != 1 || !strings.Contains(string(got), "TASK-new-archive") {
+				t.Fatalf("archive was not deduplicated and moved:\n%s", got)
+			}
+		})
+	}
+}
+
 func TestSetMovesTaskWithinDocument(t *testing.T) {
 	dir := t.TempDir()
 	withBoardFiles(t, dir)

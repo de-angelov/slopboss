@@ -273,6 +273,12 @@ func Set(id string, update Update) (Task, error) {
 			}
 			sourceCandidate := source.data[:source.start] + source.data[source.end:]
 			newTarget := insertTask(string(targetData), block, update.Section)
+			if boardFileName(targetPath) == "archive" {
+				newTarget, err = removeIdenticalArchiveDuplicates(newTarget)
+				if err != nil {
+					return Task{}, err
+				}
+			}
 			if err := validateWholeDocument(sourceCandidate, boardFileName(sourcePath)); err != nil {
 				return Task{}, err
 			}
@@ -299,6 +305,33 @@ func Set(id string, update Update) (Task, error) {
 		}
 	}
 	return Get(id)
+}
+
+// removeIdenticalArchiveDuplicates collapses repeated serialized archive task
+// blocks while preserving the first copy. A repeated ID with different content
+// is ambiguous and must be resolved explicitly instead of discarded.
+func removeIdenticalArchiveDuplicates(data string) (string, error) {
+	spans := taskBlocks(data)
+	seen := map[string]string{}
+	var out strings.Builder
+	cursor := 0
+	for _, span := range spans {
+		id := metadataValue(span.text, "task id")
+		if prior, ok := seen[id]; ok {
+			if strings.TrimSpace(prior) != strings.TrimSpace(span.text) {
+				return "", fmt.Errorf("cannot archive with conflicting duplicate task ID %q", id)
+			}
+			out.WriteString(data[cursor:span.start])
+			cursor = span.end
+			continue
+		}
+		seen[id] = span.text
+	}
+	if len(seen) == len(spans) {
+		return data, nil
+	}
+	out.WriteString(data[cursor:])
+	return out.String(), nil
 }
 
 func lifecycleChange(u Update) bool {
