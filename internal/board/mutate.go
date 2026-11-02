@@ -318,7 +318,7 @@ func removeIdenticalArchiveDuplicates(data string) (string, error) {
 	for _, span := range spans {
 		id := metadataValue(span.text, "task id")
 		if prior, ok := seen[id]; ok {
-			if strings.TrimSpace(prior) != strings.TrimSpace(span.text) {
+			if archiveRecordContent(prior) != archiveRecordContent(span.text) {
 				return "", fmt.Errorf("cannot archive with conflicting duplicate task ID %q", id)
 			}
 			out.WriteString(data[cursor:span.start])
@@ -332,6 +332,23 @@ func removeIdenticalArchiveDuplicates(data string) (string, error) {
 	}
 	out.WriteString(data[cursor:])
 	return out.String(), nil
+}
+
+// archiveRecordContent compares the record's headings and content while
+// ignoring Markdown document/section headings that can be captured at the end
+// of a task block in concatenated archive snapshots. Metadata and task prose
+// remain part of the comparison so meaningful differences are never dropped.
+func archiveRecordContent(block string) string {
+	lines := strings.Split(block, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "# ARCHIVE") || trimmed == "## Done" || trimmed == "Completed work history. Normal orchestrator prompts do not load this file." {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
 func lifecycleChange(u Update) bool {
