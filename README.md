@@ -17,7 +17,7 @@
 ---
 
 > **SYSTEM NOTICE // ALL OPERATORS**  
-> This is a live operations manual. The board is the only source of truth. Everything else is telemetry.
+> This is a live operations manual. The board records the desired work; controller state records leases and recovery evidence.
 
 ---
 
@@ -29,7 +29,7 @@
 slopboss reads a plain-Markdown task board, spins up a team of AI coding agents
 (Codex, Claude Code, OpenCode, or Antigravity), and keeps the running sessions
 continuously reconciled with the board — assigning work, isolating each agent in
-its own git workspace, and shutting sessions down as tasks land on `main`.
+its own git workspace, and shutting sessions down as tasks land on the configured integration branch (default: `main`).
 
 Agents coordinate through readable, editable Markdown files. The controller also
 stores local recovery state in `workspaces/controller-state.json`, including
@@ -177,17 +177,17 @@ SLOPBOSS> monitor --loop --interval 10s
                                    └─────┬──────┘  └─────┬──────┘   └─────┬──────┘
                                          │ branch + PR   │                │
                                          └───────────────┴────────────────┘
-                                                    merges to main
+                                            merges to integration branch
 
 SLOPBOSS> [OK] board reconciled // 3 sessions active // awaiting next poll...
 ```
 
 1. **POLL** — every `10s`, slopboss reads the board files.
 2. **RECONCILE** — it compares each task's assigned lane against the sessions that are actually running and computes the difference.
-3. **CONVERGE** — it starts a backend session for any assigned-but-not-running task and cancels sessions whose task has moved, changed, or already merged to `main`. Cancellation is debounced by a grace period so completion-time board rewrites don't kill live work.
+3. **CONVERGE** — it starts a backend session for any assigned-but-not-running task and cancels sessions whose task has moved, changed, or already merged to the integration branch. Cancellation is debounced by a grace period so completion-time board rewrites don't kill live work.
 4. **REPEAT** — the TUI refreshes continuously; the loop runs until interrupted.
 
-Because a task that merged to `main` but was never archived still counts as done,
+Because a task that merged to the integration branch but was never archived still counts as done,
 dependent tasks never get stuck behind a session that was cancelled mid-completion.
 
 ---
@@ -199,6 +199,10 @@ dependent tasks never get stuck behind a session that was cancelled mid-completi
 | `slopboss setup` | Interactive wizard (like `npm init`): prompts for the board directory, product repo, base branch, dev-agent count, and backend; clones the workspaces, creates the base branch if missing, scaffolds the board files + `CONFIG.md`, then runs an **adaptive tech interview** — the backend asks follow-up questions (slopboss relays each Q&A) and writes `TECH.md`. Any answer given as a flag isn't prompted, so it can run fully non-interactively. |
 | `slopboss run` | Run the autonomous reconcile loop with a live TUI until interrupted. |
 | `slopboss groom` | Launch a one-off **interactive** Team Lead session to capture and prioritize tasks in `BACKLOG.md`. |
+| `slopboss board` | Inspect and update board tasks, assignments, and continuation requests. |
+| `slopboss recover` | Inspect worker leases or authorize recovery after verifying a worker has stopped. |
+| `slopboss doctor` | Check whether the board can be operated safely. |
+| `slopboss view` | Attach to a detached dashboard session. |
 | `slopboss eval groom` | Design an eval interactively with the Team Lead, written to `EVAL.md`. |
 | `slopboss eval run` | Run the eval (`EVAL.md` at the repo root by default; `--config` to override) and produce a report. |
 | `slopboss version` | Print the slopboss version. |
@@ -226,8 +230,9 @@ dependent tasks never get stuck behind a session that was cancelled mid-completi
 
 ## THE BOARD
 
-slopboss treats a handful of Markdown files at your repo root as the entire
-coordination surface. `setup` scaffolds minimal starters you customize per project:
+The board directory contains Markdown files for coordinating work. `setup`
+scaffolds minimal starters you customize per project; the controller also keeps
+recovery state under `workspaces/`:
 
 | FILE | CLEARANCE | ROLE |
 | --- | --- | --- |
@@ -256,14 +261,17 @@ empty to defer to that backend's normal default.
 
 ### TASK FORMAT
 
-A task is a small block of Markdown with a title, `Owner`, `Branch`, `Status`,
-and a free-form body describing the work — for example:
+A task is a Markdown block with a title, task ID, lifecycle fields, and a
+free-form body describing the work — for example:
 
 ```markdown
 ### Add dark-mode toggle to settings
+Task ID: SETTINGS-01
+Category: AFK
 Owner: (unassigned)
 Branch: agent/1/dark-mode-toggle
 Status: Backlog
+Dependencies: none
 
 Add a theme toggle to the settings page that persists the choice to localStorage
 and respects the OS `prefers-color-scheme` on first load.
@@ -360,7 +368,7 @@ slopboss/
 └── internal/
     ├── config/             # paths, roles, tuning constants, repo-root discovery
     ├── logx/               # shared append-only event log
-    ├── git/                # git plumbing for workspaces & origin/main
+    ├── git/                # git plumbing for workspaces & integration branch
     ├── board/              # Task model, board parsing, queries, merge detection
     ├── provider/           # Codex / Claude backend abstraction + monitors
     ├── prompt/             # cache-friendly prompt assembly
@@ -388,7 +396,7 @@ which is why `tui` depends on `orchestrator`, and never the reverse.
 
 Key design choices:
 
-- **FILES OVER STATE.** The board is the only source of truth; slopboss holds no database and can be restarted at any time without losing progress.
+- **FILES OVER STATE.** Markdown files record desired work; local controller state records worker leases and recovery evidence. After an interrupted run, unresolved leases can require inspection and explicit recovery before work resumes.
 - **RECONCILE OVER DISPATCH.** Rather than firing tasks once, the loop continuously drives observed state toward the board's desired state.
 - **BOUNDED AGENTIC TURNS.** Grooming sessions are capped to keep token growth from ballooning superlinearly; hitting the cap simply resumes from the updated board next poll, so nothing is lost.
 
