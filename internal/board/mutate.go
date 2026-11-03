@@ -365,12 +365,6 @@ func Set(id string, update Update) (Task, error) {
 			}
 			sourceCandidate := source.data[:source.start] + source.data[source.end:]
 			newTarget := insertTask(string(targetData), block, update.Section)
-			if boardFileName(targetPath) == "archive" {
-				newTarget, err = removeIdenticalArchiveDuplicates(newTarget)
-				if err != nil {
-					return Task{}, err
-				}
-			}
 			if err := validateWholeDocument(sourceCandidate, boardFileName(sourcePath)); err != nil {
 				return Task{}, err
 			}
@@ -411,50 +405,6 @@ func Set(id string, update Update) (Task, error) {
 		result.BlockingTasks = update.BlockedBy
 	}
 	return result, nil
-}
-
-// removeIdenticalArchiveDuplicates collapses repeated serialized archive task
-// blocks while preserving the first copy. A repeated ID with different content
-// is ambiguous and must be resolved explicitly instead of discarded.
-func removeIdenticalArchiveDuplicates(data string) (string, error) {
-	spans := taskBlocks(data)
-	seen := map[string]string{}
-	var out strings.Builder
-	cursor := 0
-	for _, span := range spans {
-		id := metadataValue(span.text, "task id")
-		if prior, ok := seen[id]; ok {
-			if archiveRecordContent(prior) != archiveRecordContent(span.text) {
-				return "", fmt.Errorf("cannot archive with conflicting duplicate task ID %q", id)
-			}
-			out.WriteString(data[cursor:span.start])
-			cursor = span.end
-			continue
-		}
-		seen[id] = span.text
-	}
-	if len(seen) == len(spans) {
-		return data, nil
-	}
-	out.WriteString(data[cursor:])
-	return out.String(), nil
-}
-
-// archiveRecordContent compares the record's headings and content while
-// ignoring Markdown document/section headings that can be captured at the end
-// of a task block in concatenated archive snapshots. Metadata and task prose
-// remain part of the comparison so meaningful differences are never dropped.
-func archiveRecordContent(block string) string {
-	lines := strings.Split(block, "\n")
-	kept := lines[:0]
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "# ARCHIVE") || trimmed == "## Done" || trimmed == "Completed work history. Normal orchestrator prompts do not load this file." {
-			continue
-		}
-		kept = append(kept, line)
-	}
-	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
 func lifecycleChange(u Update) bool {
@@ -681,18 +631,13 @@ func validateWholeDocument(data, file string) error {
 		}
 		if strings.HasPrefix(h, "## ") && !strings.HasPrefix(h, "### ") {
 			section := strings.TrimSpace(strings.TrimPrefix(h, "## "))
-			// ARCHIVE.md may contain multiple historical Done sections. Moves
-			// use insertTask's first-match rule, making the destination stable.
-			if sections[section] && !(file == "archive" && section == "Done") {
+			if sections[section] {
 				return fmt.Errorf("duplicate section heading %q", section)
 			}
 			sections[section] = true
 		}
 	}
-	// Archive snapshots can be concatenated, leaving more than one document
-	// heading. Their task records remain valid and serialized moves should still
-	// append to the first Done section. Active board documents stay singular.
-	if top != 1 && file != "archive" {
+	if top != 1 {
 		return fmt.Errorf("board document must contain exactly one top-level heading (found %d)", top)
 	}
 	seen := map[string]bool{}

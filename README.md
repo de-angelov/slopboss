@@ -235,8 +235,17 @@ Add a theme toggle to the settings page that persists the choice to localStorage
 and respects the OS `prefers-color-scheme` on first load.
 ```
 
-The Team Lead moves it into a lane in `TASKS.md`; a Dev Agent implements it on its
-branch and rewrites `TASKS.md`/`ARCHIVE.md` as the final step when the work is done.
+The Team Lead moves it into a lane in `TASKS.md`; a Dev Agent implements it on
+its branch and reports the result. The Team Lead uses `slopboss board set` to
+update lifecycle metadata and move completed work into `ARCHIVE.md`.
+
+Board commands reject documents with duplicate task IDs, repeated section
+headings, or more than one top-level heading. If an older `ARCHIVE.md` contains
+concatenated snapshots, stop the loop and back up the file before cleaning it:
+keep one document heading and one `## Done` section, then compare duplicate
+task records and resolve them without losing distinct history. Retry the board
+command after the archive has been cleaned. A failed move leaves both files
+unchanged.
 
 ---
 
