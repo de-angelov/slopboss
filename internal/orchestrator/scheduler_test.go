@@ -38,7 +38,7 @@ func TestTeamLeadPlannerPrioritizesFollowUpAndFallsBackToAudit(t *testing.T) {
 	}
 }
 
-func TestCompletedDecompositionRetriesAfterCooldown(t *testing.T) {
+func TestCompletedDecompositionDoesNotRetryUnchangedWork(t *testing.T) {
 	withRetryTestState(t)
 	oldStore, oldLaunch, oldWorkspace := controllerStateStore, launchControllerSession, controllerWorkspaceExists
 	oldRunning, oldFinished, oldPending, oldActivity := running, finished, cancelPendingSince, lastTeamLeadActivity
@@ -50,7 +50,7 @@ func TestCompletedDecompositionRetriesAfterCooldown(t *testing.T) {
 	running, finished, cancelPendingSince = map[string]RunningSession{}, map[string]FinishedSession{}, map[string]time.Time{}
 	lastTeamLeadActivity = time.Now()
 	tasks := []board.Task{{ID: "WAIT", Title: "Waiting", Section: "Backlog", Status: "Backlog", Dependencies: "MISSING"}}
-	task := decompositionTask([]string{"WAIT"})
+	task := decompositionTaskForBoard([]string{"WAIT"}, tasks, map[string]bool{})
 	finishedAt := time.Now().Add(-config.FailedSessionRetryDelay - time.Second)
 	lease := ControllerWorkerLease{
 		Intent:  ControllerTaskIntent{TaskID: controllerTaskID(task, task.Key), Role: teamLeadRole, Branch: controllerBranch(task, teamLeadRole)},
@@ -68,20 +68,20 @@ func TestCompletedDecompositionRetriesAfterCooldown(t *testing.T) {
 		}
 	}
 	reconcile(tasks)
-	if launches != 1 {
-		t.Fatalf("unchanged completed decomposition launched %d retries, want 1", launches)
+	if launches != 0 {
+		t.Fatalf("unchanged completed decomposition launched %d retries, want 0", launches)
 	}
 	state, err := loadControllerState()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := state.Leases[0]; got.Attempt != 2 || got.Terminal != nil {
-		t.Fatalf("retry lease = %#v", got)
+	if got := state.Leases[0]; got.Attempt != 1 || got.Terminal == nil {
+		t.Fatalf("completed lease changed: %#v", got)
 	}
 }
 
 func TestCompletedTeamLeadPassRecoveryIsBounded(t *testing.T) {
-	for _, prefix := range []string{"decompose\x00", "unblock\x00"} {
+	for _, prefix := range []string{"unblock\x00"} {
 		task := board.Task{Key: prefix + "work"}
 		lease := ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: task.Key, Role: teamLeadRole}, LeaseID: controllerLeaseID(teamLeadRole, task, task.Key), Attempt: 1, HeartbeatAt: time.Now(), Terminal: &ControllerTerminalResult{Outcome: string(sessionCompleted), FinishedAt: time.Now(), Evidence: "finished"}}
 		state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
@@ -96,6 +96,23 @@ func TestCompletedTeamLeadPassRecoveryIsBounded(t *testing.T) {
 	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: "ordinary", Role: teamLeadRole}, LeaseID: "ordinary", Attempt: 1, HeartbeatAt: time.Now(), Terminal: &ControllerTerminalResult{Outcome: string(sessionCompleted), FinishedAt: time.Now(), Evidence: "finished"}}
 	if _, launch, _ := recoveryLeaseDecision(ControllerState{Leases: []ControllerWorkerLease{lease}}, teamLeadRole, lease.LeaseID); launch {
 		t.Fatal("ordinary completed work must not retry")
+	}
+}
+
+func TestDecompositionKeyTracksRelevantChanges(t *testing.T) {
+	tasks := []board.Task{{ID: "WAIT", Title: "Waiting", Section: "Backlog", Dependencies: "DEP", Body: "Original"}, {ID: "OTHER", Body: "unrelated"}}
+	key := func(done map[string]bool) string { return decompositionTaskForBoard([]string{"WAIT"}, tasks, done).Key }
+	original := key(map[string]bool{})
+	tasks[1].Body = "unrelated change"
+	if key(map[string]bool{}) != original {
+		t.Fatal("unrelated task changed decomposition key")
+	}
+	if key(map[string]bool{"DEP": true}) == original {
+		t.Fatal("resolved dependency did not change decomposition key")
+	}
+	tasks[0].Body = "New evidence"
+	if key(map[string]bool{}) == original {
+		t.Fatal("new blocker evidence did not change decomposition key")
 	}
 }
 
@@ -396,7 +413,7 @@ func TestCompletionFollowUpTaskUsesOnlyEndedDevSessions(t *testing.T) {
 	finished[teamLeadRole] = FinishedSession{Role: teamLeadRole, Task: "Groom", TaskKey: "team", Outcome: sessionCompleted}
 	mu.Unlock()
 
-	task, ok := completionFollowUpTask()
+	task, ok := completionFollowUpTask(ControllerState{})
 	if !ok {
 		t.Fatal("expected ended dev sessions to schedule a Team Lead follow-up")
 	}
@@ -410,6 +427,30 @@ func TestCompletionFollowUpTaskUsesOnlyEndedDevSessions(t *testing.T) {
 	}
 	if strings.Contains(task.Body, "Groom") {
 		t.Fatalf("follow-up body must exclude Team Lead sessions: %s", task.Body)
+	}
+}
+
+func TestCompletionFollowUpIncludesMatchingDurableFailure(t *testing.T) {
+	withRetryTestState(t)
+	when := time.Now()
+	finished[devAgent1Role] = FinishedSession{Role: devAgent1Role, Task: "Repair tests", TaskKey: "task-42", Branch: "agent/1/repair", Outcome: sessionFailed, FinishedAt: when}
+	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{Role: devAgent1Role, TaskID: "TASK-42", Branch: "agent/1/repair"}, Attempt: 2, Terminal: &ControllerTerminalResult{Outcome: string(sessionFailed), FinishedAt: when, Evidence: "verification failed: npm test"}}
+	task, ok := completionFollowUpTask(ControllerState{Leases: []ControllerWorkerLease{lease}})
+	if !ok {
+		t.Fatal("expected follow-up")
+	}
+	for _, want := range []string{"TASK-42", "agent/1/repair", "Attempt: 2", "verification failed: npm test"} {
+		if !strings.Contains(task.Body, want) {
+			t.Fatalf("follow-up missing %q: %s", want, task.Body)
+		}
+	}
+	lease.Terminal.FinishedAt = when.Add(time.Second)
+	stale, _ := completionFollowUpTask(ControllerState{Leases: []ControllerWorkerLease{lease}})
+	if strings.Contains(stale.Body, "verification failed: npm test") {
+		t.Fatal("evidence from a different attempt was included")
+	}
+	if stale.Key != task.Key {
+		t.Fatal("additional context changed follow-up scheduling identity")
 	}
 }
 
@@ -601,12 +642,12 @@ func TestTerminalEvidenceHasOneDurableFollowUpHandoff(t *testing.T) {
 	if len(restored) != 1 || restored[devAgent1Role].Outcome != sessionCompleted {
 		t.Fatalf("durable terminal result produced finished sessions %#v, want one completed dev session", restored)
 	}
-	followUp, ok := completionFollowUpTask()
+	followUp, ok := completionFollowUpTask(ControllerState{})
 	if !ok || !strings.Contains(followUp.Body, task.Title) {
 		t.Fatalf("durable completion did not produce its Team Lead hand-off: task=%#v ok=%v", followUp, ok)
 	}
 	restoreTerminalLease(second.Leases[0], task, task.Key)
-	followUpAgain, ok := completionFollowUpTask()
+	followUpAgain, ok := completionFollowUpTask(ControllerState{})
 	if !ok || followUpAgain.Key != followUp.Key {
 		t.Fatalf("repeated reconciliation duplicated or changed follow-up: first=%#v second=%#v", followUp, followUpAgain)
 	}

@@ -50,7 +50,7 @@ func TestExhaustedDecompositionSurvivesAuditReplacement(t *testing.T) {
 	finished = map[string]FinishedSession{}
 	lastTeamLeadActivity = time.Now()
 	tasks := []board.Task{{ID: "WAIT", Title: "Waiting", Section: "Backlog", Status: "Backlog", Dependencies: "MISSING"}}
-	task := decompositionTask([]string{"WAIT"})
+	task := decompositionTaskForBoard([]string{"WAIT"}, tasks, map[string]bool{})
 	id := controllerLeaseID(teamLeadRole, task, task.Key)
 	exhausted := ControllerWorkerLease{Intent: ControllerTaskIntent{Role: teamLeadRole, TaskID: task.Key}, LeaseID: id, Attempt: config.MaxFailedSessionRetries + 1, Terminal: &ControllerTerminalResult{Outcome: string(sessionFailed)}}
 	audit := idleAuditTask(time.Now())

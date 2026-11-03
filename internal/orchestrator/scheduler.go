@@ -174,7 +174,7 @@ func continuationTaskKey(task board.Task, role string, state ControllerState) st
 
 func retryableCompletedTeamLeadPass(role, taskKey, outcome string) bool {
 	return role == teamLeadRole && outcome == string(sessionCompleted) &&
-		(strings.HasPrefix(taskKey, "decompose\x00") || strings.HasPrefix(taskKey, "unblock\x00"))
+		strings.HasPrefix(taskKey, "unblock\x00")
 }
 
 // retryableDurableResult accepts only outcomes whose controller evidence is
@@ -289,7 +289,7 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 	// when ready backlog work exists. Once that pass has ended, let unrelated
 	// ready work proceed even if the orphan remains unresolved.
 	if board.HasOrphanBlocker(tasks) && backlogTask != nil {
-		orphanPass := decompositionTask(board.BlockedBacklogIDs(tasks, done))
+		orphanPass := decompositionTaskForBoard(board.BlockedBacklogIDs(tasks, done), tasks, done)
 		id := controllerLeaseID(teamLeadRole, orphanPass, orphanPass.Key)
 		lease, found := durable.History[id]
 		if !found {
@@ -300,7 +300,7 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 		}
 	}
 
-	followUpTask, needsFollowUp := completionFollowUpTask()
+	followUpTask, needsFollowUp := completionFollowUpTask(durable)
 
 	if needsFollowUp {
 		return desiredSession{Task: followUpTask, TaskKey: followUpTask.Key}, true
@@ -320,7 +320,7 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 		// board.FirstBacklogTask can then assign. Keyed on the blocked set so it
 		// runs once per distinct set of blockers instead of every poll.
 		if blocked := board.BlockedBacklogIDs(tasks, done); len(blocked) > 0 {
-			task := decompositionTask(blocked)
+			task := decompositionTaskForBoard(blocked, tasks, done)
 			candidate = desiredSession{Task: task, TaskKey: task.Key}
 		}
 	}
@@ -336,7 +336,7 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 	mu.Lock()
 	due := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= auditInterval
 	mu.Unlock()
-	exhausted := false
+	exhausted, completed := false, false
 	if candidate.TaskKey != "" {
 		id := controllerLeaseID(teamLeadRole, candidate.Task, candidate.TaskKey)
 		lease, found := durable.History[id]
@@ -344,8 +344,9 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 			lease, found = findControllerLease(durable, teamLeadRole)
 		}
 		exhausted = found && lease.LeaseID == id && lease.Terminal != nil && lease.Attempt > config.MaxFailedSessionRetries && lease.Terminal.Outcome != string(sessionCancelled) && lease.Terminal.Outcome != string(sessionUsageLimited)
+		completed = found && lease.LeaseID == id && lease.Terminal != nil && lease.Terminal.Outcome == string(sessionCompleted)
 	}
-	if exhausted || candidate.TaskKey == "" {
+	if exhausted || completed || candidate.TaskKey == "" {
 		lease, found := findControllerLease(durable, teamLeadRole)
 		if found && lease.Terminal == nil && strings.HasPrefix(lease.Intent.TaskID, "idle-audit\x00") {
 			audit := idleAuditTask(time.Now())
@@ -353,7 +354,7 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 			return desiredSession{Task: audit, TaskKey: audit.Key}, true
 		}
 	}
-	if candidate.TaskKey != "" && !exhausted {
+	if candidate.TaskKey != "" && !exhausted && !completed {
 		return candidate, true
 	}
 	if exhausted && due {
@@ -440,8 +441,8 @@ func reconcileWithMode(tasks []board.Task, mode string) {
 	for role, session := range running {
 		desiredSession, stillDesired := desired[role]
 		matches := stillDesired && desiredSession.TaskKey == session.TaskKey
-		// Let a coordinating Team Lead finish; a changed snapshot is handled next.
-		if mode == "agent" && role == teamLeadRole && strings.HasPrefix(session.TaskKey, agentLeadPrefix) {
+		// Let the Team Lead finish its bounded pass; reconcile new state next tick.
+		if role == teamLeadRole {
 			matches = true
 		}
 		// A session whose task has already landed (archived Done, or its squash
@@ -574,11 +575,12 @@ func reconcileWithMode(tasks []board.Task, mode string) {
 // completionFollowUpTask snapshots completed or failed dev sessions and turns
 // the snapshot into a stable synthetic Team Lead task. The key changes only when
 // a dev session ends or its outcome changes, which naturally debounces the pass.
-func completionFollowUpTask() (board.Task, bool) {
+func completionFollowUpTask(durable ControllerState) (board.Task, bool) {
 	mu.Lock()
 	defer mu.Unlock()
 
 	entries := make([]string, 0, len(finished))
+	contextByEntry := make(map[string]string)
 	for role, session := range finished {
 		if _, isDevAgent := config.DevAgentIndexForRole(role); !isDevAgent {
 			continue
@@ -586,12 +588,21 @@ func completionFollowUpTask() (board.Task, bool) {
 		if session.Outcome != sessionCompleted && session.Outcome != sessionFailed {
 			continue
 		}
-		entries = append(entries, role+" | "+string(session.Outcome)+" | "+session.Task+" | "+session.TaskKey)
+		entry := role + " | " + string(session.Outcome) + " | " + session.Task + " | " + session.TaskKey
+		entries = append(entries, entry)
+		lease, ok := findControllerLease(durable, role)
+		if ok && lease.Terminal != nil && lease.Intent.Branch == session.Branch && lease.Terminal.Outcome == string(session.Outcome) && lease.Terminal.FinishedAt.Equal(session.FinishedAt) {
+			contextByEntry[entry] = fmt.Sprintf("\n  Task ID: %s\n  Branch: %s\n  Attempt: %d\n  Recorded result: %s", lease.Intent.TaskID, lease.Intent.Branch, lease.Attempt, lease.Terminal.Evidence)
+		}
 	}
 	if len(entries) == 0 {
 		return board.Task{}, false
 	}
 	sort.Strings(entries)
+	details := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		details = append(details, entry+contextByEntry[entry])
+	}
 
 	body := `Dev-agent sessions have ended. Perform a board-only completion follow-up before assigning new work.
 
@@ -601,10 +612,10 @@ For every session listed below, inspect its task's current board state and choos
 3. Blocked — record the exact failing command and blocker, and move the task out of the lane.
 4. Requeued — move back to backlog with corrected scope and dependencies.
 
-A completed session is not proof of a merge. Do not modify product code or inspect unrelated branches.
+A completed session is not proof of a merge. For a failed session, investigate the recorded result and relevant task/branch before deciding the next step. Check whether an automatic retry is already running before directing further work. Do not modify product code or inspect unrelated branches.
 
 Ended sessions:
-- ` + strings.Join(entries, "\n- ")
+- ` + strings.Join(details, "\n- ")
 
 	return board.Task{
 		Section: teamLeadFollowUpSection,
@@ -689,6 +700,33 @@ func decompositionTask(blockedIDs []string) board.Task {
 		Body:    decomposeBody,
 		Key:     "decompose\x00" + strings.Join(blockedIDs, ","),
 	}
+}
+
+// Include blocked-task content and its dependencies so a relevant change
+// permits a fresh pass without reacting to unrelated lane activity.
+func decompositionTaskForBoard(blockedIDs []string, tasks []board.Task, done map[string]bool) board.Task {
+	task := decompositionTask(blockedIDs)
+	blocked := make(map[string]bool, len(blockedIDs))
+	for _, id := range blockedIDs {
+		blocked[id] = true
+	}
+	parts := make([]string, 0, len(blockedIDs))
+	for _, t := range tasks {
+		if !blocked[t.ID] {
+			continue
+		}
+		parts = append(parts, strings.Join([]string{t.ID, t.Title, t.Section, t.Status, t.Category, t.Dependencies, t.BlockingTasks, t.Body}, "\x00"))
+		for _, dep := range strings.Split(t.Dependencies, ",") {
+			dep = strings.TrimSpace(dep)
+			if dep != "" && !strings.EqualFold(dep, "none") {
+				parts = append(parts, fmt.Sprintf("dependency:%s=%t", dep, done[dep]))
+			}
+		}
+	}
+	sort.Strings(parts)
+	hash := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	task.Key += "\x00" + hex.EncodeToString(hash[:])
+	return task
 }
 
 func idleAuditTask(now time.Time) board.Task {

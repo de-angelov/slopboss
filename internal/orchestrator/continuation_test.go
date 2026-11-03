@@ -108,7 +108,7 @@ func TestCompletionFollowUpTaskInstructsResume(t *testing.T) {
 		mu.Unlock()
 	}()
 
-	task, ok := completionFollowUpTask()
+	task, ok := completionFollowUpTask(ControllerState{})
 	if !ok {
 		t.Fatal("expected completion follow up task")
 	}
@@ -116,4 +116,3 @@ func TestCompletionFollowUpTaskInstructsResume(t *testing.T) {
 		t.Errorf("expected follow up body to instruct board resume, got:\n%s", task.Body)
 	}
 }
-

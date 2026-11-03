@@ -96,6 +96,28 @@ func TestCoordinationDoesNotCancelWhenSnapshotChanges(t *testing.T) {
 	}
 }
 
+func TestPlannerDoesNotCancelActiveTeamLeadWhenBoardChanges(t *testing.T) {
+	withRetryTestState(t)
+	oldStore, oldRunning, oldFinished, oldPending := controllerStateStore, running, finished, cancelPendingSince
+	t.Cleanup(func() {
+		controllerStateStore, running, finished, cancelPendingSince = oldStore, oldRunning, oldFinished, oldPending
+	})
+	controllerStateStore = NewControllerStateStore(filepath.Join(t.TempDir(), "state.json"))
+	task := board.Task{ID: "OLD", Title: "Old work", Key: "old"}
+	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: task.ID, Role: teamLeadRole, Branch: controllerBranch(task, teamLeadRole)}, LeaseID: controllerLeaseID(teamLeadRole, task, task.Key), HeartbeatAt: time.Now(), Attempt: 1}
+	if err := controllerStateStore.Commit(ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}); err != nil {
+		t.Fatal(err)
+	}
+	cancelled := false
+	running = map[string]RunningSession{teamLeadRole: {Role: teamLeadRole, TaskKey: task.Key, Cancel: func() { cancelled = true }}}
+	finished = map[string]FinishedSession{}
+	cancelPendingSince = map[string]time.Time{teamLeadRole: time.Now().Add(-2 * config.CancelGracePeriod)}
+	reconcileWithMode([]board.Task{{ID: "NEW", Title: "New work", Section: "Backlog", Status: "Backlog"}}, "planner")
+	if cancelled {
+		t.Fatal("board change cancelled an active planner Team Lead")
+	}
+}
+
 func TestCoordinationUnresolvedLeaseDoesNotRelaunchAfterRestart(t *testing.T) {
 	withRetryTestState(t)
 	oldStore, oldRunning, oldFinished, oldPending, oldLaunch, oldWorkspace := controllerStateStore, running, finished, cancelPendingSince, launchControllerSession, controllerWorkspaceExists
