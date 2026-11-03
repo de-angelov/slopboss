@@ -1,6 +1,7 @@
 package board
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,48 @@ Keep this body exactly.
 	for _, want := range []string{"Owner: Dev Agent 1", "Status: In Progress", "Category: AFK", "Keep this body exactly."} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("board lost %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestGetRejectsDuplicateIDs(t *testing.T) {
+	for _, sameFile := range []bool{false, true} {
+		t.Run(map[bool]string{false: "across files", true: "within file"}[sameFile], func(t *testing.T) {
+			withBoardFiles(t, t.TempDir())
+			record := "### Existing\nTask ID: DUP-1\nOwner: Unassigned\nStatus: Backlog\n"
+			backlog := "# BACKLOG\n\n## Backlog\n\n" + record
+			if sameFile {
+				backlog += "\n" + record
+			} else {
+				writeBoard(t, config.TasksFile, "# TASKS\n\n## Blocked Tasks\n\n"+record)
+			}
+			writeBoard(t, config.BacklogFile, backlog)
+			if _, err := Get("DUP-1"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+				t.Fatalf("Get error = %v, want ambiguity", err)
+			}
+		})
+	}
+}
+
+func TestConcurrentBoardCreatesPreserveAllTasks(t *testing.T) {
+	withBoardFiles(t, t.TempDir())
+	writeBoard(t, config.BacklogFile, "# BACKLOG\n\n## Backlog\n")
+	const count = 8
+	errs := make(chan error, count)
+	for i := 0; i < count; i++ {
+		go func(i int) {
+			_, err := CreateBacklogTask(Task{ID: fmt.Sprintf("TASK-%d", i), Title: "Task", Category: "AFK", Body: "Objective: x\nScope: x\nOut of Scope: x\nAcceptance Criteria: x\nVerification: x"})
+			errs <- err
+		}(i)
+	}
+	for i := 0; i < count; i++ {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
+	}
+	for i := 0; i < count; i++ {
+		if _, err := Get(fmt.Sprintf("TASK-%d", i)); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

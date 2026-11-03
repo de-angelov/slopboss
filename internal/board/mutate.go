@@ -219,16 +219,11 @@ func getTaskUnlocked(id string) (Task, error) {
 	if id == "" {
 		return Task{}, fmt.Errorf("task ID is required")
 	}
-	for _, path := range boardPaths() {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return Task{}, err
-		}
-		if found, ok := parseAllTasks(string(data), path)[id]; ok {
-			return found, nil
-		}
+	path, source, err := findTaskSource(id)
+	if err != nil {
+		return Task{}, err
 	}
-	return Task{}, fmt.Errorf("task %q not found", id)
+	return parseAllTasks(source.data, path)[id], nil
 }
 
 // NormalizeTasks removes repeated document/section headings and duplicate
