@@ -21,6 +21,11 @@ func TestExtractVerification(t *testing.T) {
 			want: "npx vitest run tests/syntax.test.ts",
 		},
 		{
+			name: "inline with trailing instruction sentence",
+			body: "Objective: foo\nVerification: npm run docs:check; git diff --check. Compare the document with the TASK-095 decision.",
+			want: "npm run docs:check; git diff --check",
+		},
+		{
 			name: "inline with full-suite diagnostic",
 			body: "Objective: foo\nVerification: npx vitest run tests/formatter.test.ts --reporter=dot; npm run build. Full-suite diagnostic: npm test.",
 			want: "npx vitest run tests/formatter.test.ts --reporter=dot; npm run build",

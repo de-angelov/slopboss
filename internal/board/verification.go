@@ -9,6 +9,7 @@ var (
 	verificationSectionRe = regexp.MustCompile(`(?i)(?:^|\n)##+\s*Verification\s*\n([^#]+)`)
 	codeFenceRe           = regexp.MustCompile("(?s)```(?:sh|bash)?\\s*\\n?(.*?)\\n?```")
 	fullSuiteDiagnosticRe = regexp.MustCompile(`(?i)\s*(?:Full-suite diagnostic|Diagnostic full suite|Diagnostic suite|Full-suite|Diagnostic):.*$`)
+	trailingSentenceRe    = regexp.MustCompile(`(?:\.\s+[A-Z][a-zA-Z]+.*$)`)
 )
 
 // ExtractVerification parses the targeted verification command from a task body.
@@ -54,6 +55,7 @@ func ExtractVerification(body string) string {
 
 func cleanVerificationCommand(raw string) string {
 	cleaned := fullSuiteDiagnosticRe.ReplaceAllString(raw, "")
+	cleaned = trailingSentenceRe.ReplaceAllString(cleaned, "")
 	cleaned = strings.TrimSpace(cleaned)
 
 	lines := strings.Split(cleaned, "\n")
