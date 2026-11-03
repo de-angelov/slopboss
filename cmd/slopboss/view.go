@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -36,8 +37,19 @@ var viewCmd = &cobra.Command{
 }
 
 func defaultViewSession(boardRoot string) string {
-	name := strings.TrimSuffix(filepath.Base(boardRoot), "-board")
-	return "slopboss-" + name
+	root, err := filepath.Abs(boardRoot)
+	if err != nil {
+		root = filepath.Clean(boardRoot)
+	}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	sum := sha256.Sum256([]byte(root))
+	return fmt.Sprintf("%s-%x", legacyViewSession(root), sum[:6])
+}
+
+func legacyViewSession(boardRoot string) string {
+	return "slopboss-" + strings.TrimSuffix(filepath.Base(boardRoot), "-board")
 }
 
 func init() {

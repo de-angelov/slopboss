@@ -58,3 +58,20 @@ func RecoverStoppedRole(role string) error {
 	}
 	return fmt.Errorf("no lease for role %q", role)
 }
+
+// TerminalWorkerLease returns evidence for a finished worker assignment.
+func TerminalWorkerLease(role, taskID, branch string) (ControllerWorkerLease, error) {
+	store := NewControllerStateStore(filepath.Join(config.WorkspacesRoot, "controller-state.json"))
+	state, err := store.Load()
+	if err != nil {
+		return ControllerWorkerLease{}, err
+	}
+	lease, found := findControllerLease(state, role)
+	if !found || lease.Intent.TaskID != taskID || lease.Intent.Branch != branch {
+		return ControllerWorkerLease{}, fmt.Errorf("no matching worker lease for %s on %q", taskID, role)
+	}
+	if lease.Terminal == nil {
+		return ControllerWorkerLease{}, fmt.Errorf("worker %s has no terminal evidence; verify it stopped and recover its lease first", role)
+	}
+	return lease, nil
+}

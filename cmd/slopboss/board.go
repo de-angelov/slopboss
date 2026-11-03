@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/de-angelov/slopboss/internal/board"
+	"github.com/de-angelov/slopboss/internal/orchestrator"
 )
 
 var boardCmd = &cobra.Command{
@@ -33,6 +34,28 @@ var boardGetCmd = &cobra.Command{
 			return err
 		}
 		return writeJSON(value)
+	},
+}
+
+var continuationReason string
+var boardResumeCmd = &cobra.Command{
+	Use:   "resume TASK-ID",
+	Short: "Request a finished worker to continue its task",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		task, err := board.Get(args[0])
+		if err != nil {
+			return err
+		}
+		lease, err := orchestrator.TerminalWorkerLease(task.Owner, task.ID, task.Branch)
+		if err != nil {
+			return err
+		}
+		result, err := board.RequestContinuation(task.ID, task.Owner, task.Branch, lease.LeaseID, continuationReason)
+		if err != nil {
+			return err
+		}
+		return writeJSON(result)
 	},
 }
 
@@ -146,6 +169,7 @@ func init() {
 	boardCreateCmd.Flags().StringVar(&createBranch, "branch", "none", "proposed task branch")
 	boardCreateCmd.Flags().StringVar(&createDependencies, "dependencies", "none", "dependency task IDs")
 	boardCreateCmd.Flags().StringVar(&createBody, "body", "", "task body with Objective, Scope, Out of Scope, Acceptance Criteria, Verification")
-	boardCmd.AddCommand(boardGetCmd, boardSetCmd, boardCreateCmd, boardAssignCmd, boardNormalizeTasksCmd)
+	boardResumeCmd.Flags().StringVar(&continuationReason, "reason", "", "specific instructions for the continuation")
+	boardCmd.AddCommand(boardGetCmd, boardSetCmd, boardCreateCmd, boardAssignCmd, boardResumeCmd, boardNormalizeTasksCmd)
 	rootCmd.AddCommand(boardCmd)
 }

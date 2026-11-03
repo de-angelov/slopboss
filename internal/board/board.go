@@ -23,6 +23,7 @@ type Task struct {
 	Category      string
 	Dependencies  string
 	BlockingTasks string
+	ContinueAfter string
 	Body          string
 	Key           string
 }
@@ -156,8 +157,15 @@ func ParseTasks(data string) []Task {
 		body = nil
 	}
 
+	var fence markdownFence
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		if fence.contains(line) || (current != nil && isTaskBodyHeading(trimmed)) {
+			if current != nil {
+				body = append(body, line)
+			}
+			continue
+		}
 
 		if strings.HasPrefix(trimmed, "## ") && !strings.HasPrefix(trimmed, "### ") {
 			flush()
@@ -207,6 +215,8 @@ func ParseTasks(data string) []Task {
 				current.Dependencies = v
 			case "blocking tasks":
 				current.BlockingTasks = v
+			case "continue after":
+				current.ContinueAfter = v
 			}
 		}
 

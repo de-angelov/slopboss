@@ -47,6 +47,12 @@ func runManaged(ctx context.Context, provider, mode string) error {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return fmt.Errorf("tmux is required to manage the dashboard; install tmux and retry: %w", err)
 	}
+	// Older versions used a basename-only session; refuse to start a second
+	// controller until the old session is intentionally stopped.
+	legacy := legacyViewSession(config.RepoRoot)
+	if exec.CommandContext(ctx, "tmux", "has-session", "-t", "="+legacy).Run() == nil {
+		return fmt.Errorf("legacy dashboard session %q exists; stop it before starting this board, or use 'slopboss view --session %s' to inspect it", legacy, legacy)
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("locate slopboss executable for managed session: %w", err)

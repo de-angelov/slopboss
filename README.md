@@ -104,7 +104,9 @@ slopboss run
 `run` opens a live TUI and keeps working until you press `Ctrl-C` (or send
 `SIGTERM`), at which point it cancels in-flight sessions and exits cleanly.
 To run in a detached tmux session, use `slopboss run --detach`; reconnect with
-`slopboss view`.
+`slopboss view`. Dashboard names include a hash of the board path to avoid
+collisions. If an older basename-only session exists, inspect it with
+`slopboss view --session <old-session>` and stop it before starting a new one.
 
 To try agent-led coordination, run `slopboss run --team-lead-mode agent`.
 The Team Lead receives a compact board and durable worker-result snapshot and
@@ -119,6 +121,11 @@ different mode; `--detach` otherwise reuses the existing session.
 The Team Lead can use `slopboss --dir <board> board assign TASK-ID "Dev Agent 1"`
 to assign eligible work to a free lane. The command checks the worker, task,
 and dependencies under the board lock and accepts a repeated identical assignment.
+To request that a finished worker continue the same task, use
+`slopboss --dir <board> board resume TASK-ID --reason "specific next step"`.
+The request cites the current terminal worker lease; the controller processes
+that recorded request once and does not restart a worker without terminal evidence.
+Running the command after a later session has finished requests another session.
 Agent mode is experimental: worker outcome evidence currently records the process
 result, and agent decisions are not a substitute for checking merge and test evidence.
 

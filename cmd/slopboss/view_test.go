@@ -2,12 +2,13 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
 func TestDefaultViewSessionUsesBoardName(t *testing.T) {
-	if got, want := defaultViewSession("/work/funscript-board"), "slopboss-funscript"; got != want {
-		t.Fatalf("defaultViewSession = %q, want %q", got, want)
+	if got := defaultViewSession("/work/funscript-board"); !strings.HasPrefix(got, "slopboss-funscript-") {
+		t.Fatalf("unexpected session %q", got)
 	}
 }
 
@@ -33,5 +34,11 @@ func TestManagedSessionCommandPreservesAgentMode(t *testing.T) {
 	want := []string{"slopboss", "--dir", "/board", "run", "--team-lead-mode", "agent"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("command = %#v", got)
+	}
+}
+
+func TestDashboardNamesDistinguishSameNamedBoards(t *testing.T) {
+	if defaultViewSession("/one/shared-board") == defaultViewSession("/two/shared-board") {
+		t.Fatal("different boards share a dashboard session")
 	}
 }

@@ -114,4 +114,7 @@ func TestCoordinationUnresolvedLeaseDoesNotRelaunchAfterRestart(t *testing.T) {
 	if launches != 0 {
 		t.Fatalf("unresolved lease relaunched %d times", launches)
 	}
+	if Snapshot().RecoveryByRole[teamLeadRole] == "" {
+		t.Fatal("unresolved lease was hidden from dashboard")
+	}
 }

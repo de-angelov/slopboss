@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/de-angelov/slopboss/internal/board"
 	"github.com/de-angelov/slopboss/internal/config"
@@ -33,6 +35,12 @@ func buildRows(tasks []board.Task, snap orchestrator.StateSnapshot) []agentRow {
 			continue
 		}
 
+		if reason := snap.RecoveryByRole[rows[i].role]; reason != "" {
+			rows[i].status = "recovery required"
+			rows[i].task = reason
+			continue
+		}
+
 		if _, isDevAgent := config.DevAgentIndexForRole(rows[i].role); isDevAgent {
 			activeTasks := board.ActiveTasksForRole(tasks, rows[i].role)
 			if len(activeTasks) > 1 {
@@ -50,7 +58,13 @@ func buildRows(tasks []board.Task, snap orchestrator.StateSnapshot) []agentRow {
 
 		task := board.FindDesiredTaskForRole(tasks, rows[i].role)
 		if task.Title != "" {
-			if finishedSession, ok := snap.Finished[rows[i].role]; ok && finishedSession.TaskKey == task.Key {
+			if time.Now().Before(snap.PauseUntil) {
+				rows[i].status = "usage-limited"
+				rows[i].task = "Paused until " + snap.PauseUntil.Format("15:04") + ": " + task.Title
+				rows[i].branch = task.Branch
+				continue
+			}
+			if finishedSession, ok := snap.Finished[rows[i].role]; ok && (finishedSession.TaskKey == task.Key || (task.ContinueAfter != "" && strings.HasPrefix(finishedSession.TaskKey, task.Key+"\x00continue\x00"))) {
 				rows[i].status = string(finishedSession.Outcome)
 			} else {
 				rows[i].status = task.Status

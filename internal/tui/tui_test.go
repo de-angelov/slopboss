@@ -83,3 +83,10 @@ func TestStatusColor(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildRowsShowsRecoveryInsteadOfIdle(t *testing.T) {
+	rows := buildRows(nil, orchestrator.StateSnapshot{RecoveryByRole: map[string]string{config.TeamLeadRole: "worker lease unresolved; use slopboss recover"}})
+	if rows[0].status != "recovery required" {
+		t.Fatalf("hidden recovery: %#v", rows[0])
+	}
+}

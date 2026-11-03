@@ -176,7 +176,17 @@ func CreateBacklogTask(task Task) (Task, error) {
 func validateTaskBody(body string) error {
 	required := []string{"Objective:", "Scope:", "Out of Scope:", "Acceptance Criteria:", "Verification:"}
 	for _, section := range required {
-		if !strings.Contains(body, section) {
+		found := strings.Contains(body, section)
+		if !found {
+			for _, line := range strings.Split(body, "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "#") && strings.EqualFold(strings.TrimSpace(strings.TrimLeft(line, "#")), strings.TrimSuffix(section, ":")) {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
 			return fmt.Errorf("task body is missing required section %q", section)
 		}
 	}
@@ -489,10 +499,20 @@ func findTaskSource(id string, sourceSection ...string) (string, taskSource, err
 
 func sectionAt(data string, offset int) string {
 	section := ""
+	inTask := false
+	var fence markdownFence
 	for _, line := range strings.Split(data[:offset], "\n") {
+		if fence.contains(line) {
+			continue
+		}
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "## ") {
+		if strings.HasPrefix(line, "### ") {
+			inTask = true
+			continue
+		}
+		if strings.HasPrefix(line, "## ") && !(inTask && isTaskBodyHeading(line)) {
 			section = strings.TrimSpace(strings.TrimPrefix(line, "## "))
+			inTask = false
 		}
 	}
 	return section
@@ -547,8 +567,13 @@ func taskBlocks(data string) []blockSpan {
 	var blocks []blockSpan
 	start := -1
 	offset := 0
+	var fence markdownFence
 	for _, line := range strings.SplitAfter(data, "\n") {
 		trimmed := strings.TrimSpace(line)
+		if fence.contains(line) || (start >= 0 && isTaskBodyHeading(trimmed)) {
+			offset += len(line)
+			continue
+		}
 		if strings.HasPrefix(trimmed, "## ") && !strings.HasPrefix(trimmed, "### ") && start >= 0 {
 			blocks = append(blocks, blockSpan{start: start, end: offset, text: data[start:offset]})
 			start = -1
@@ -650,8 +675,23 @@ func insertTask(target, block, section string) string {
 func validateWholeDocument(data, file string) error {
 	top := 0
 	sections := map[string]bool{}
+	inTask := false
+	var fence markdownFence
 	for _, line := range strings.Split(data, "\n") {
+		if fence.contains(line) {
+			continue
+		}
 		h := strings.TrimSpace(line)
+		if strings.HasPrefix(h, "### ") {
+			inTask = true
+			continue
+		}
+		if inTask && isTaskBodyHeading(h) {
+			continue
+		}
+		if strings.HasPrefix(h, "## ") {
+			inTask = false
+		}
 		if strings.HasPrefix(h, "# ") {
 			top++
 		}
@@ -689,12 +729,7 @@ func parseTaskBlock(data string, span blockSpan) (Task, bool) {
 		return Task{}, false
 	}
 	task := Task{Title: strings.TrimSpace(strings.TrimPrefix(titleLine, "### "))}
-	for _, line := range strings.Split(data[:span.start], "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "## ") && !strings.HasPrefix(trimmed, "### ") {
-			task.Section = strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
-		}
-	}
+	task.Section = sectionAt(data, span.start)
 	for _, line := range strings.Split(span.text, "\n") {
 		if key, value, ok := parseMetadataLine(line); ok {
 			switch key {
@@ -746,13 +781,7 @@ func parseAllTasks(data, path string) map[string]Task {
 	result := map[string]Task{}
 	for _, span := range taskBlocks(data) {
 		t := Task{Title: strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.Split(span.text, "\n")[0]), "### "))}
-		// Determine the section from the portion immediately before this block.
-		prefix := data[:span.start]
-		for _, line := range strings.Split(prefix, "\n") {
-			if s := strings.TrimSpace(line); strings.HasPrefix(s, "## ") && !strings.HasPrefix(s, "### ") {
-				t.Section = strings.TrimSpace(strings.TrimPrefix(s, "## "))
-			}
-		}
+		t.Section = sectionAt(data, span.start)
 		for _, line := range strings.Split(span.text, "\n") {
 			if k, v, ok := parseMetadataLine(line); ok {
 				switch k {
@@ -770,6 +799,8 @@ func parseAllTasks(data, path string) map[string]Task {
 					t.Dependencies = v
 				case "blocking tasks", "blocked by":
 					t.BlockingTasks = v
+				case "continue after":
+					t.ContinueAfter = v
 				}
 			}
 		}

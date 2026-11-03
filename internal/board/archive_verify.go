@@ -100,7 +100,11 @@ func archivedCompletions() []archiveCompletion {
 		current = archiveCompletion{}
 	}
 
+	var fence markdownFence
 	for _, line := range strings.Split(data, "\n") {
+		if fence.contains(line) {
+			continue
+		}
 		trimmed := strings.TrimSpace(line)
 		if match := archiveHeadingRe.FindStringSubmatch(trimmed); match != nil {
 			flush()

@@ -142,6 +142,22 @@ func recoveryLeaseDecision(state ControllerState, role, leaseID string) (Control
 	return lease, true, ""
 }
 
+// continuationTaskKey accepts a continuation only when it cites terminal
+// evidence for this exact assignment. The terminal lease stays in history.
+func continuationTaskKey(task board.Task, role string, state ControllerState) string {
+	if task.ContinueAfter == "" {
+		return task.Key
+	}
+	prior, ok := state.History[task.ContinueAfter]
+	if !ok {
+		prior, ok = findControllerLease(state, role)
+	}
+	if !ok || prior.LeaseID != task.ContinueAfter || prior.Terminal == nil || prior.Intent.Role != role || prior.Intent.TaskID != task.ID || prior.Intent.Branch != controllerBranch(task, role) {
+		return task.Key
+	}
+	return task.Key + "\x00continue\x00" + prior.LeaseID
+}
+
 func retryableCompletedTeamLeadPass(role, taskKey, outcome string) bool {
 	return role == teamLeadRole && outcome == string(sessionCompleted) &&
 		(strings.HasPrefix(taskKey, "decompose\x00") || strings.HasPrefix(taskKey, "unblock\x00"))
@@ -341,6 +357,14 @@ func reconcileWithMode(tasks []board.Task, mode string) {
 		logx.Event("cannot load controller state; refusing launches: %v", err)
 		return
 	}
+	mu.Lock()
+	recoveryByRole = map[string]string{}
+	for _, lease := range durable.Leases {
+		if _, active := running[lease.Intent.Role]; !active && lease.Terminal == nil {
+			recoveryByRole[lease.Intent.Role] = "Unresolved lease: verify worker stopped; use slopboss recover"
+		}
+	}
+	mu.Unlock()
 	done := board.CompletedSet()
 	desired := map[string]desiredSession{}
 	invalidRoles := map[string]bool{}
@@ -361,7 +385,7 @@ func reconcileWithMode(tasks []board.Task, mode string) {
 	for _, task := range tasks {
 		if role, ok := config.DevAgentRoleForActiveSection(task.Section); ok {
 			if task.Owner == role && strings.EqualFold(task.Status, "In Progress") {
-				addDesired(role, task, task.Key)
+				addDesired(role, task, continuationTaskKey(task, role, durable))
 			}
 			continue
 		}
@@ -427,6 +451,9 @@ func reconcileWithMode(tasks []board.Task, mode string) {
 		}
 		if recoveryReason != "" {
 			recordRecoveryDecision(taskKey, recoveryReason)
+			mu.Lock()
+			recoveryByRole[role] = recoveryReason
+			mu.Unlock()
 		}
 		if !shouldLaunch {
 			if lease.LeaseID == leaseID && lease.Terminal != nil {
@@ -480,7 +507,7 @@ func reconcileWithMode(tasks []board.Task, mode string) {
 		}
 
 		if paused, until := codexLaunchPaused(time.Now()); paused {
-			logx.Event("skipping %s because Codex usage limit pause is active until %s", role, until.Format(time.RFC3339))
+			logx.Event("skipping %s because provider usage limit pause is active until %s", role, until.Format(time.RFC3339))
 			continue
 		}
 

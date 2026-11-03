@@ -137,7 +137,7 @@ func statusColor(status string) tcell.Color {
 	switch status {
 	case "running", "completed":
 		return paletteMint
-	case "failed", "board error":
+	case "failed", "board error", "recovery required":
 		return paletteCoral
 	case "usage-limited":
 		return tcell.NewHexColor(0xCE84B8)

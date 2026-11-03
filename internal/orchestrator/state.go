@@ -37,6 +37,7 @@ var (
 	finished                  = map[string]FinishedSession{}
 	circuitBreakers           = map[string]*circuitBreaker{}
 	recoveryDecisions         = map[string]string{}
+	recoveryByRole            = map[string]string{}
 	codexPausedUntil          time.Time
 	lastTeamLeadActivity      time.Time
 	controllerStateStore      = NewControllerStateStore(config.RepoRoot + "/workspaces/controller-state.json")
@@ -107,11 +108,13 @@ const (
 // StateSnapshot is an immutable copy of the orchestrator's session state, taken
 // under mu, for the UI to render without touching the live maps or the mutex.
 type StateSnapshot struct {
-	Running      map[string]RunningSession
-	Finished     map[string]FinishedSession
-	ProviderName string
-	CircuitOpen  map[string]bool
-	Recovery     map[string]string // task key -> controller recovery decision/reason
+	Running        map[string]RunningSession
+	Finished       map[string]FinishedSession
+	ProviderName   string
+	CircuitOpen    map[string]bool
+	Recovery       map[string]string // task key -> controller recovery decision/reason
+	RecoveryByRole map[string]string
+	PauseUntil     time.Time
 }
 
 // Snapshot returns a consistent copy of the current session state.
@@ -120,10 +123,12 @@ func Snapshot() StateSnapshot {
 	defer mu.Unlock()
 
 	snap := StateSnapshot{
-		Running:     make(map[string]RunningSession, len(running)),
-		Finished:    make(map[string]FinishedSession, len(finished)),
-		CircuitOpen: make(map[string]bool),
-		Recovery:    make(map[string]string, len(recoveryDecisions)),
+		Running:        make(map[string]RunningSession, len(running)),
+		Finished:       make(map[string]FinishedSession, len(finished)),
+		CircuitOpen:    make(map[string]bool),
+		Recovery:       make(map[string]string, len(recoveryDecisions)),
+		RecoveryByRole: make(map[string]string, len(recoveryByRole)),
+		PauseUntil:     codexPausedUntil,
 	}
 	for k, v := range running {
 		snap.Running[k] = v
@@ -138,6 +143,9 @@ func Snapshot() StateSnapshot {
 	}
 	for k, v := range recoveryDecisions {
 		snap.Recovery[k] = v
+	}
+	for role, reason := range recoveryByRole {
+		snap.RecoveryByRole[role] = reason
 	}
 	if sessionProvider != nil {
 		snap.ProviderName = sessionProvider.Name()
