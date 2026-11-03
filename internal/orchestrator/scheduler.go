@@ -213,40 +213,9 @@ type desiredSession struct {
 	TaskKey string
 }
 
-func reconcile(tasks []board.Task) {
-	controllerMu.Lock()
-	defer controllerMu.Unlock()
-	durable, err := loadControllerState()
-	if err != nil {
-		logx.Event("cannot load controller state; refusing launches: %v", err)
-		return
-	}
-	done := board.CompletedSet()
-	desired := map[string]desiredSession{}
-	invalidRoles := map[string]bool{}
+// planTeamLeadAction selects the next Team Lead assignment in priority order.
+func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable ControllerState, desired map[string]desiredSession, invalidRoles map[string]bool) {
 	var backlogTask *board.Task
-
-	addDesired := func(role string, task board.Task, taskKey string) {
-		if invalidRoles[role] {
-			return
-		}
-		if existing, exists := desired[role]; exists {
-			logx.Event("TASKS board error: multiple In Progress tasks for %s (%q and %q); refusing to start role", role, existing.Task.Title, task.Title)
-			delete(desired, role)
-			invalidRoles[role] = true
-			return
-		}
-		desired[role] = desiredSession{Task: task, TaskKey: taskKey}
-	}
-
-	for _, task := range tasks {
-		if role, ok := config.DevAgentRoleForActiveSection(task.Section); ok {
-			if task.Owner == role && strings.EqualFold(task.Status, "In Progress") {
-				addDesired(role, task, task.Key)
-			}
-			continue
-		}
-	}
 
 	// Prefer unblocking a ready blocked task over grooming new work: unblocking
 	// unlocks downstream work and recovers stalled lanes. Only fall back to the
@@ -333,6 +302,44 @@ func reconcile(tasks []board.Task) {
 			desired[teamLeadRole] = desiredSession{Task: audit, TaskKey: audit.Key}
 		}
 	}
+
+}
+
+func reconcile(tasks []board.Task) {
+	controllerMu.Lock()
+	defer controllerMu.Unlock()
+	durable, err := loadControllerState()
+	if err != nil {
+		logx.Event("cannot load controller state; refusing launches: %v", err)
+		return
+	}
+	done := board.CompletedSet()
+	desired := map[string]desiredSession{}
+	invalidRoles := map[string]bool{}
+
+	addDesired := func(role string, task board.Task, taskKey string) {
+		if invalidRoles[role] {
+			return
+		}
+		if existing, exists := desired[role]; exists {
+			logx.Event("TASKS board error: multiple In Progress tasks for %s (%q and %q); refusing to start role", role, existing.Task.Title, task.Title)
+			delete(desired, role)
+			invalidRoles[role] = true
+			return
+		}
+		desired[role] = desiredSession{Task: task, TaskKey: taskKey}
+	}
+
+	for _, task := range tasks {
+		if role, ok := config.DevAgentRoleForActiveSection(task.Section); ok {
+			if task.Owner == role && strings.EqualFold(task.Status, "In Progress") {
+				addDesired(role, task, task.Key)
+			}
+			continue
+		}
+	}
+
+	planTeamLeadAction(tasks, done, durable, desired, invalidRoles)
 
 	now := time.Now()
 

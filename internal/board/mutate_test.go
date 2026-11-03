@@ -65,6 +65,57 @@ func TestSetSelectsDuplicateIDBySourceSection(t *testing.T) {
 	}
 }
 
+func TestSetValidatesSelectedDuplicate(t *testing.T) {
+	withBoardFiles(t, t.TempDir())
+	writeBoard(t, config.BacklogFile, "# BACKLOG\n\n## Backlog\n\n### Backlog copy\nTask ID: DUP-1\nOwner: Unassigned\nStatus: Backlog\n")
+	writeBoard(t, config.TasksFile, "# TASKS\n\n## Dev Agent 2 In Progress\n\n### Active copy\nTask ID: DUP-1\nOwner: Dev Agent 2\nStatus: In Progress\n\n## Blocked Tasks\n")
+	got, err := Set("DUP-1", Update{SourceSection: "Dev Agent 2 In Progress", Owner: "Dev Agent 2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Section != "Dev Agent 2 In Progress" || got.Status != "In Progress" {
+		t.Fatalf("updated task = %#v", got)
+	}
+}
+
+func TestCreateRejectsUnreliableTaskLookup(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T)
+	}{
+		{"duplicate ID", func(t *testing.T) {
+			record := "### Existing\nTask ID: DUP-1\nOwner: Unassigned\nStatus: Backlog\n"
+			writeBoard(t, config.BacklogFile, "# BACKLOG\n\n## Backlog\n\n"+record)
+			writeBoard(t, config.TasksFile, "# TASKS\n\n## Blocked Tasks\n\n"+record)
+		}},
+		{"missing board file", func(t *testing.T) {
+			if err := os.Remove(config.ArchiveFile); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withBoardFiles(t, t.TempDir())
+			tc.setup(t)
+			before, err := os.ReadFile(config.BacklogFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = CreateBacklogTask(Task{ID: "DUP-1", Title: "New", Category: "AFK", Body: "Objective: x\nScope: x\nOut of Scope: x\nAcceptance Criteria: x\nVerification: x"})
+			if err == nil {
+				t.Fatal("expected lookup error")
+			}
+			after, err := os.ReadFile(config.BacklogFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(before) {
+				t.Fatal("backlog changed after lookup error")
+			}
+		})
+	}
+}
+
 func TestReconcileDuplicatePreservesSelectedIdenticalRecord(t *testing.T) {
 	dir := t.TempDir()
 	withBoardFiles(t, dir)

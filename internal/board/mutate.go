@@ -1,6 +1,7 @@
 package board
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/de-angelov/slopboss/internal/config"
 )
+
+var errTaskNotFound = errors.New("task not found")
 
 // Update is the structural portion of a task an agent may change through the
 // board command. Empty fields mean "leave unchanged"; ClearBlockedBy explicitly
@@ -122,6 +125,8 @@ func CreateBacklogTask(task Task) (Task, error) {
 	}
 	if _, _, err := findTaskSource(task.ID); err == nil {
 		return Task{}, fmt.Errorf("task %q already exists", task.ID)
+	} else if !errors.Is(err, errTaskNotFound) {
+		return Task{}, err
 	}
 	if !strings.EqualFold(task.Category, "AFK") && !strings.EqualFold(task.Category, "HITL") {
 		return Task{}, fmt.Errorf("category must be AFK or HITL")
@@ -334,11 +339,9 @@ func Set(id string, update Update) (Task, error) {
 	if update.Section != "" && update.File == "" {
 		return Task{}, fmt.Errorf("--section requires --file so the destination is explicit")
 	}
+	selected := parseAllTasks("## "+sectionAt(source.data, source.start)+"\n"+source.block, sourcePath)[id]
 	if lifecycleChange(update) {
-		current, err := Get(id)
-		if err != nil {
-			return Task{}, err
-		}
+		current := selected
 		candidate := applyUpdateToTask(current, update)
 		if _, err := ValidateLifecycle(candidate, boardFileName(targetPath)); err != nil {
 			return Task{}, err
@@ -393,7 +396,7 @@ func Set(id string, update Update) (Task, error) {
 			return Task{}, err
 		}
 	}
-	result := parseAllTasks(source.data, sourcePath)[id]
+	result := selected
 	result = applyUpdateToTask(result, update)
 	if update.Branch != "" {
 		result.Branch = update.Branch
@@ -505,7 +508,7 @@ func findTaskSource(id string, sourceSection ...string) (string, taskSource, err
 	if len(matches) > 1 {
 		return "", taskSource{}, fmt.Errorf("task %q is ambiguous; specify --source-section", id)
 	}
-	return "", taskSource{}, fmt.Errorf("task %q not found", id)
+	return "", taskSource{}, fmt.Errorf("task %q: %w", id, errTaskNotFound)
 }
 
 func sectionAt(data string, offset int) string {
@@ -762,14 +765,7 @@ func writeAtomic(path, data string) error {
 }
 
 func parseAllTasks(data, path string) map[string]Task {
-	section := ""
 	result := map[string]Task{}
-	for _, line := range strings.Split(data, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "## ") && !strings.HasPrefix(trimmed, "### ") {
-			section = strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
-		}
-	}
 	for _, span := range taskBlocks(data) {
 		t := Task{Title: strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.Split(span.text, "\n")[0]), "### "))}
 		// Determine the section from the portion immediately before this block.
@@ -805,7 +801,6 @@ func parseAllTasks(data, path string) map[string]Task {
 			result[t.ID] = t
 		}
 	}
-	_ = section
 	_ = path
 	return result
 }
