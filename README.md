@@ -106,6 +106,22 @@ slopboss run
 To run in a detached tmux session, use `slopboss run --detach`; reconnect with
 `slopboss view`.
 
+To try agent-led coordination, run `slopboss run --team-lead-mode agent`.
+The Team Lead receives a compact board and durable worker-result snapshot and
+chooses what needs attention. A changed snapshot triggers another session;
+a successful session on an unchanged snapshot is not repeated. An active
+coordination session is allowed to finish before the new snapshot is handled.
+The existing deterministic planner remains the default (`--team-lead-mode planner`).
+Both modes retain the controller's worker leases and explicit recovery flow.
+If a detached tmux session already exists, stop it before starting one with a
+different mode; `--detach` otherwise reuses the existing session.
+
+The Team Lead can use `slopboss --dir <board> board assign TASK-ID "Dev Agent 1"`
+to assign eligible work to a free lane. The command checks the worker, task,
+and dependencies under the board lock and accepts a repeated identical assignment.
+Agent mode is experimental: worker outcome evidence currently records the process
+result, and agent decisions are not a substitute for checking merge and test evidence.
+
 > **WHERE TO RUN IT:** slopboss resolves which board to use in this order —
 > `--dir <board>` if given, else the current directory if it's a board, else the
 > **active board recorded by `setup`** (in `~/.config/slopboss/config.md`). So
@@ -175,6 +191,7 @@ dependent tasks never get stuck behind a session that was cancelled mid-completi
 | FLAG | COMMANDS | DEFAULT | DESCRIPTION |
 | --- | --- | --- | --- |
 | `--provider` | `run`, `groom`, `setup`, `eval run`, `eval groom` | persisted (`codex`) | Agent backend: `codex`, `claude`, `opencode`, or `agy`. `setup` **persists** your choice to `CONFIG.md`, and the other commands default to it. |
+| `--team-lead-mode` | `run` | `planner` | Team Lead coordination policy: `planner` or experimental `agent`. |
 | `--detach` | `run` | `false` | Start or reuse a detached tmux session; attach with `slopboss view`. |
 | `--dir` | **all commands** (global) | current directory | Board directory to operate in — run any command against a board from anywhere without `cd`. |
 | `--repo` | `setup` | — (prompted) | Product repository to clone into each workspace. |

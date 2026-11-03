@@ -19,6 +19,14 @@ import (
 // supplied UI and runs until interrupted (SIGINT/SIGTERM), then cancels in-flight
 // sessions and exits.
 func RunLoop(parent context.Context, providerName string, ui UI) error {
+	return RunLoopWithMode(parent, providerName, "planner", ui)
+}
+
+// RunLoopWithMode selects the Team Lead coordination policy for this run.
+func RunLoopWithMode(parent context.Context, providerName, mode string, ui UI) error {
+	if mode != "planner" && mode != "agent" {
+		return fmt.Errorf("invalid team lead mode %q (use planner or agent)", mode)
+	}
 	unlock, err := lockController()
 	if err != nil {
 		return err
@@ -42,6 +50,7 @@ func RunLoop(parent context.Context, providerName string, ui UI) error {
 	logx.Event("orchestrator started")
 	logx.Event("repo root: %s", config.RepoRoot)
 	logx.Event("agent provider: %s", sessionProvider.Name())
+	logx.Event("team lead mode: %s", mode)
 	logx.Event("dev agents: %d", config.DevAgentCount)
 	if config.DevAgentCount == 0 {
 		logx.Event("no repo-agent-* workspaces found; run 'slopboss setup' first")
@@ -78,7 +87,7 @@ func RunLoop(parent context.Context, providerName string, ui UI) error {
 				for _, issue := range issues {
 					logx.Event("archive verification failed: %s", issue.Error())
 				}
-				reconcile(tasks)
+				reconcileWithMode(tasks, mode)
 				ui.SetTasks(tasks)
 				if len(issues) > 0 {
 					ui.SetError(fmt.Errorf("archive verification failed: %s", issues[0].Error()))

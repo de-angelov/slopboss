@@ -331,7 +331,9 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 	return desiredSession{}, false
 }
 
-func reconcile(tasks []board.Task) {
+func reconcile(tasks []board.Task) { reconcileWithMode(tasks, "planner") }
+
+func reconcileWithMode(tasks []board.Task, mode string) {
 	controllerMu.Lock()
 	defer controllerMu.Unlock()
 	durable, err := loadControllerState()
@@ -365,7 +367,9 @@ func reconcile(tasks []board.Task) {
 		}
 	}
 
-	if action, ok := planTeamLeadAction(tasks, done, durable, desired, invalidRoles); ok {
+	if mode == "agent" {
+		desired[teamLeadRole] = coordinationAction(tasks, done, durable)
+	} else if action, ok := planTeamLeadAction(tasks, done, durable, desired, invalidRoles); ok {
 		desired[teamLeadRole] = action
 	}
 
@@ -381,6 +385,10 @@ func reconcile(tasks []board.Task) {
 	for role, session := range running {
 		desiredSession, stillDesired := desired[role]
 		matches := stillDesired && desiredSession.TaskKey == session.TaskKey
+		// Let a coordinating Team Lead finish; a changed snapshot is handled next.
+		if mode == "agent" && role == teamLeadRole && strings.HasPrefix(session.TaskKey, agentLeadPrefix) {
+			matches = true
+		}
 		// A session whose task has already landed (archived Done, or its squash
 		// commit is on main) is completing normally — never cancel it; let it exit
 		// and remove itself from `running`.

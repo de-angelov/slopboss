@@ -346,6 +346,10 @@ func Set(id string, update Update) (Task, error) {
 		return Task{}, err
 	}
 	defer unlock()
+	return setUnlocked(id, update)
+}
+
+func setUnlocked(id string, update Update) (Task, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Task{}, fmt.Errorf("task ID is required")

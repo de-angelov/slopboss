@@ -122,7 +122,7 @@ func runTeamLead(ctx context.Context, task board.Task, tasks []board.Task) Sessi
 		logx.Event("team lead branch: %s", currentBranch)
 	}
 
-	p := prompt.BuildPrompt(teamLeadRole, task, tasks, fmt.Sprintf(`
+	rules := fmt.Sprintf(`
 Role: Team Lead Agent
 Runtime Rules:
 - No code implementation during grooming. Maintain sensible backlog priorities. For a Completion Follow-Up task only, inspect the named assigned branches and, after focused verification, rebase, squash-merge, push, and archive them; otherwise do not review or merge dev-agent branches.
@@ -138,11 +138,16 @@ Efficiency Rules (keep this session small — you are hard-capped at %d turns):
 - Do NOT slurp whole files (no full ARCHIVE.md read) and do NOT re-derive board state from git: no repo-wide 'grep -rn', no 'git log -N', no 'ls -R', no 'git fetch' or branch enumeration. Every command's output is re-sent on every later turn, so keep each output tiny and targeted.
 - Decide, then write. Apply your assignment/priority decisions in as few board edits as possible — batch edits to a file rather than many small rewrites.
 - If you cannot finish within the turn budget, apply the highest-priority board change first; the next grooming pass resumes from the updated board.
-`, config.TeamLeadMaxTurns))
+`, config.TeamLeadMaxTurns)
+	if isAgentLeadTask(task) {
+		rules = fmt.Sprintf(`Role: Team Lead Agent
+Decide the next useful coordination actions from the supplied board and worker snapshot. Use slopboss board commands to make structural changes; do not edit shared board files directly. You may inspect and review relevant worker branches, and merge only after focused verification. Do not implement product code. Preserve uncertainty and report concrete evidence. If there is nothing useful to do, finish without changes. You are limited to %d turns.`, config.TeamLeadMaxTurns)
+	}
+	p := prompt.BuildPrompt(teamLeadRole, task, tasks, rules)
 
 	before := boardStateHash()
 	outcome := runSession(ctx, teamLeadRole, config.TeamLeadPath, p, sessionProvider)
-	if outcome == sessionCompleted && task.Section != teamLeadIdleAuditSection && before != "" && boardStateHash() == before {
+	if outcome == sessionCompleted && task.Section != teamLeadIdleAuditSection && !isAgentLeadTask(task) && before != "" && boardStateHash() == before {
 		logx.Event("team lead completed without changing the board; retrying after cooldown")
 		return sessionFailed
 	}

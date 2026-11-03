@@ -27,3 +27,11 @@ func TestManagedSessionArgsCreatesOrReusesDetachedSession(t *testing.T) {
 		t.Fatalf("managedSessionArgs = %#v, want %#v", got, want)
 	}
 }
+
+func TestManagedSessionCommandPreservesAgentMode(t *testing.T) {
+	got := managedSessionCommand("slopboss", "/board", "", "agent")
+	want := []string{"slopboss", "--dir", "/board", "run", "--team-lead-mode", "agent"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %#v", got)
+	}
+}
