@@ -281,9 +281,8 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 	// every poll; session start time provides the 30-minute quiet interval.
 	mu.Lock()
 	due := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= teamLeadIdleAuditInterval
-	session, finishedCandidate := finished[teamLeadRole]
-	exhausted := finishedCandidate && session.TaskKey == candidate.TaskKey && failedSessionRetryCounts[failedSessionRetryKey(teamLeadRole, candidate.TaskKey)] >= config.MaxFailedSessionRetries
 	mu.Unlock()
+	exhausted := false
 	if lease, found := findControllerLease(durable, teamLeadRole); found && candidate.TaskKey != "" &&
 		lease.LeaseID == controllerLeaseID(teamLeadRole, candidate.Task, candidate.TaskKey) && lease.Terminal != nil && lease.Attempt > config.MaxFailedSessionRetries {
 		exhausted = true
@@ -344,9 +343,6 @@ func reconcile(tasks []board.Task) {
 	mu.Lock()
 	for role := range finished {
 		if _, stillDesired := desired[role]; !stillDesired {
-			if role == teamLeadRole {
-				clearTeamLeadSessionRetryLocked(finished[role].TaskKey)
-			}
 			delete(finished, role)
 		}
 	}
@@ -386,7 +382,8 @@ func reconcile(tasks []board.Task) {
 		}
 		leaseID := controllerLeaseID(role, task, taskKey)
 		lease, shouldLaunch, recoveryReason := recoveryLeaseDecision(durable, role, leaseID)
-		if lease.LeaseID == leaseID && lease.Terminal != nil && retryableCompletedTeamLeadPass(role, taskKey, lease.Terminal.Outcome) {
+		if lease.LeaseID == leaseID && lease.Terminal != nil &&
+			(lease.Terminal.Outcome == string(sessionFailed) || retryableCompletedTeamLeadPass(role, taskKey, lease.Terminal.Outcome)) {
 			restoreTerminalLease(lease, task, taskKey)
 		}
 		if recoveryReason != "" {
@@ -410,15 +407,12 @@ func reconcile(tasks []board.Task) {
 		_, exists := running[role]
 		finishedSession, alreadyFinished := finished[role]
 		if alreadyFinished && finishedSession.TaskKey != taskKey {
-			if role == teamLeadRole {
-				clearTeamLeadSessionRetryLocked(finishedSession.TaskKey)
-			}
 			delete(finished, role)
 			alreadyFinished = false
 		}
 		canRetry := false
 		if alreadyFinished {
-			canRetry, _ = canRetryFailedSessionLocked(role, finishedSession, now)
+			canRetry = canRetryFailedSessionLocked(role, finishedSession, now)
 		}
 		if canRetry {
 			delete(finished, role)
@@ -449,19 +443,6 @@ func reconcile(tasks []board.Task) {
 		if paused, until := codexLaunchPaused(time.Now()); paused {
 			logx.Event("skipping %s because Codex usage limit pause is active until %s", role, until.Format(time.RFC3339))
 			continue
-		}
-
-		// Charge a retry only now that the launch is actually happening.
-		if canRetry && role == teamLeadRole {
-			mu.Lock()
-			retryCount := recordTeamLeadSessionRetryLocked(taskKey)
-			mu.Unlock()
-			logx.Event(
-				"retrying %s after failed session for same task (%d/%d)",
-				role,
-				retryCount,
-				config.MaxFailedSessionRetries,
-			)
 		}
 
 		attempt := 1
@@ -611,54 +592,10 @@ func idleAuditTask(now time.Time) board.Task {
 	}
 }
 
-// canRetryFailedSessionLocked reports whether a failed session for the same task
-// is eligible to retry, along with the number of retries already consumed. It has
-// no side effects: the retry is only counted when a launch actually happens (see
-// recordTeamLeadSessionRetryLocked), so a retry deferred by an active pause or a
-// stale board entry is never charged. Callers must hold mu.
-func canRetryFailedSessionLocked(role string, session FinishedSession, now time.Time) (bool, int) {
-	// A decomposition pass can finish normally while leaving the same blocked
-	// set (for example, it creates an owning task but fails to link it). Retry
-	// that specific Team Lead work after the normal cooldown instead of treating
-	// a successful process exit as proof the blockers were reconciled.
-	retryableDecomposition := role == teamLeadRole && strings.HasPrefix(session.TaskKey, "decompose\x00") &&
-		(session.Outcome == sessionCompleted || session.Outcome == sessionFailed)
-	retryableUnblock := role == teamLeadRole && strings.HasPrefix(session.TaskKey, "unblock\x00") &&
-		(session.Outcome == sessionCompleted || session.Outcome == sessionFailed)
-	if session.Outcome != sessionFailed && !retryableDecomposition && !retryableUnblock {
-		return false, 0
-	}
-	if now.Sub(session.FinishedAt) < config.FailedSessionRetryDelay {
-		return false, 0
-	}
-
-	if role == teamLeadRole {
-		retries := failedSessionRetryCounts[failedSessionRetryKey(role, session.TaskKey)]
-		if retries >= config.MaxFailedSessionRetries {
-			return false, retries
-		}
-		return true, retries
-	}
-	// Dev-agent retries are bounded by the durable controller lease Attempt.
-	return true, 0
-}
-
-// recordTeamLeadSessionRetryLocked consumes one Team Lead retry and returns the
-// new count. Callers must hold mu.
-func recordTeamLeadSessionRetryLocked(taskKey string) int {
-	key := failedSessionRetryKey(teamLeadRole, taskKey)
-	failedSessionRetryCounts[key]++
-	return failedSessionRetryCounts[key]
-}
-
-// clearTeamLeadSessionRetryLocked clears the Team Lead-only retry count for a
-// finished synthetic task. Callers must hold mu.
-func clearTeamLeadSessionRetryLocked(taskKey string) {
-	delete(failedSessionRetryCounts, failedSessionRetryKey(teamLeadRole, taskKey))
-}
-
-func failedSessionRetryKey(role string, taskKey string) string {
-	return role + "\x00" + taskKey
+// canRetryFailedSessionLocked checks cooldown; durable leases limit attempts.
+func canRetryFailedSessionLocked(role string, session FinishedSession, now time.Time) bool {
+	retryablePass := retryableCompletedTeamLeadPass(role, session.TaskKey, string(session.Outcome))
+	return (session.Outcome == sessionFailed || retryablePass) && now.Sub(session.FinishedAt) >= config.FailedSessionRetryDelay
 }
 
 func codexLaunchPaused(now time.Time) (bool, time.Time) {

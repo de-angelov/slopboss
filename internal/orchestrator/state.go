@@ -35,7 +35,6 @@ var (
 	controllerMu              sync.Mutex
 	running                   = map[string]RunningSession{}
 	finished                  = map[string]FinishedSession{}
-	failedSessionRetryCounts  = map[string]int{}
 	circuitBreakers           = map[string]*circuitBreaker{}
 	recoveryDecisions         = map[string]string{}
 	codexPausedUntil          time.Time
