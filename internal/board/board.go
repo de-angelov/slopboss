@@ -30,6 +30,11 @@ type Task struct {
 // ReadBoardTasks parses the active board files (backlog + lanes + archive) into
 // a single task slice.
 func ReadBoardTasks() ([]Task, error) {
+	unlock, err := lockBoard()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	var all []Task
 
 	for _, path := range []string{config.BacklogFile, config.TasksFile, config.ArchiveFile} {

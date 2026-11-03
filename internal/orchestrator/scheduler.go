@@ -50,12 +50,22 @@ func reportSessionTerminal(leaseID string, outcome SessionOutcome, role, taskKey
 		finishedAt := time.Now()
 		state.Leases[i].HeartbeatAt = finishedAt
 		state.Leases[i].Terminal = &ControllerTerminalResult{Outcome: string(outcome), FinishedAt: finishedAt, Evidence: evidence}
+		if state.History == nil {
+			state.History = make(map[string]ControllerWorkerLease)
+		}
+		state.History[leaseID] = state.Leases[i]
 		return commitControllerState(state)
 	}
 	return fmt.Errorf("controller lease %q not found for terminal event", leaseID)
 }
 
 func commitRecoveryLease(state ControllerState, lease ControllerWorkerLease, taskKey string) error {
+	if previous, found := findControllerLease(state, lease.Intent.Role); found && previous.Terminal != nil {
+		if state.History == nil {
+			state.History = make(map[string]ControllerWorkerLease)
+		}
+		state.History[previous.LeaseID] = previous
+	}
 	state.Leases = replaceControllerLease(state.Leases, lease)
 	if err := commitControllerState(state); err != nil {
 		return err
@@ -106,12 +116,17 @@ func recoveryLeaseDecision(state ControllerState, role, leaseID string) (Control
 		return ControllerWorkerLease{}, true, ""
 	}
 	if lease.Terminal == nil && time.Since(lease.HeartbeatAt) >= 10*time.Minute {
-		return lease, false, "Blocked: expired worker lease has no terminal evidence; verify worker stopped before recovery"
+		return lease, false, "Blocked: worker lease has no terminal evidence; verify worker stopped and use slopboss recover"
+	}
+	if lease.LeaseID != leaseID && lease.Terminal != nil {
+		if previous, ok := state.History[leaseID]; ok {
+			lease = previous
+		}
 	}
 	if lease.LeaseID == leaseID && lease.Terminal != nil {
 		completedPass := retryableCompletedTeamLeadPass(role, lease.Intent.TaskID, lease.Terminal.Outcome)
 		if retryableDurableResult(lease) || completedPass {
-			if lease.Attempt > config.MaxFailedSessionRetries {
+			if lease.Attempt > config.MaxFailedSessionRetries && lease.Terminal.Outcome != string(sessionCancelled) && lease.Terminal.Outcome != string(sessionUsageLimited) {
 				return lease, false, fmt.Sprintf("Blocked: retry attempts exhausted (%d); Team Lead review required (%s)", lease.Attempt-1, lease.Terminal.Evidence)
 			}
 			return lease, true, ""
@@ -245,8 +260,12 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 	// ready work proceed even if the orphan remains unresolved.
 	if board.HasOrphanBlocker(tasks) && backlogTask != nil {
 		orphanPass := decompositionTask(board.BlockedBacklogIDs(tasks, done))
-		lease, found := findControllerLease(durable, teamLeadRole)
-		if !found || lease.LeaseID != controllerLeaseID(teamLeadRole, orphanPass, orphanPass.Key) || lease.Terminal == nil {
+		id := controllerLeaseID(teamLeadRole, orphanPass, orphanPass.Key)
+		lease, found := durable.History[id]
+		if !found {
+			lease, found = findControllerLease(durable, teamLeadRole)
+		}
+		if !found || lease.LeaseID != id || lease.Terminal == nil {
 			backlogTask = nil
 		}
 	}
@@ -283,11 +302,23 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 	due := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= teamLeadIdleAuditInterval
 	mu.Unlock()
 	exhausted := false
-	if lease, found := findControllerLease(durable, teamLeadRole); found && candidate.TaskKey != "" &&
-		lease.LeaseID == controllerLeaseID(teamLeadRole, candidate.Task, candidate.TaskKey) && lease.Terminal != nil && lease.Attempt > config.MaxFailedSessionRetries {
-		exhausted = true
+	if candidate.TaskKey != "" {
+		id := controllerLeaseID(teamLeadRole, candidate.Task, candidate.TaskKey)
+		lease, found := durable.History[id]
+		if !found {
+			lease, found = findControllerLease(durable, teamLeadRole)
+		}
+		exhausted = found && lease.LeaseID == id && lease.Terminal != nil && lease.Attempt > config.MaxFailedSessionRetries && lease.Terminal.Outcome != string(sessionCancelled) && lease.Terminal.Outcome != string(sessionUsageLimited)
 	}
-	if candidate.TaskKey != "" && !(exhausted && due) {
+	if exhausted {
+		lease, found := findControllerLease(durable, teamLeadRole)
+		if found && lease.Terminal == nil && strings.HasPrefix(lease.Intent.TaskID, "idle-audit\x00") {
+			audit := idleAuditTask(time.Now())
+			audit.Key = lease.Intent.TaskID
+			return desiredSession{Task: audit, TaskKey: audit.Key}, true
+		}
+	}
+	if candidate.TaskKey != "" && !exhausted {
 		return candidate, true
 	}
 	if exhausted && due {
@@ -447,7 +478,10 @@ func reconcile(tasks []board.Task) {
 
 		attempt := 1
 		if lease.LeaseID == leaseID {
-			attempt = lease.Attempt + 1
+			attempt = lease.Attempt
+			if lease.Terminal == nil || (lease.Terminal.Outcome != string(sessionCancelled) && lease.Terminal.Outcome != string(sessionUsageLimited)) {
+				attempt++
+			}
 		}
 		newLease := ControllerWorkerLease{
 			Intent:  ControllerTaskIntent{TaskID: controllerTaskID(task, taskKey), Role: role, Branch: controllerBranch(task, role)},
@@ -457,7 +491,11 @@ func reconcile(tasks []board.Task) {
 			logx.Event("cannot record %s lease; refusing launch: %v", role, err)
 			continue
 		}
-		durable.Leases = replaceControllerLease(durable.Leases, newLease)
+		durable, err = loadControllerState()
+		if err != nil {
+			logx.Event("cannot reload %s lease; refusing launch: %v", role, err)
+			continue
+		}
 		launchControllerSession(role, task, taskKey, tasks, leaseID)
 		if role == teamLeadRole {
 			mu.Lock()

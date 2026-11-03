@@ -19,6 +19,12 @@ import (
 // supplied UI and runs until interrupted (SIGINT/SIGTERM), then cancels in-flight
 // sessions and exits.
 func RunLoop(parent context.Context, providerName string, ui UI) error {
+	unlock, err := lockController()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	p, err := provider.ByName(providerName)
 	if err != nil {
 		return err

@@ -33,7 +33,7 @@ its own git workspace, and shutting sessions down as tasks land on `main`.
 
 Agents coordinate through readable, editable Markdown files. The controller also
 stores local recovery state in `workspaces/controller-state.json`, including
-worker leases and retry attempts; that file affects recovery across restarts.
+worker leases and retry attempts; that file affects recovery across restarts. Only one controller can run per board. If a crash leaves a worker lease unresolved, first verify the worker and all its children have stopped, then run `slopboss recover "Dev Agent 1" --confirm-stopped` (using the affected role). Stop the controller before recovery.
 
 ### WHY SLOPBOSS?
 

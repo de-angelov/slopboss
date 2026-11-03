@@ -142,7 +142,7 @@ Efficiency Rules (keep this session small — you are hard-capped at %d turns):
 
 	before := boardStateHash()
 	outcome := runSession(ctx, teamLeadRole, config.TeamLeadPath, p, sessionProvider)
-	if outcome == sessionCompleted && before != "" && boardStateHash() == before {
+	if outcome == sessionCompleted && task.Section != teamLeadIdleAuditSection && before != "" && boardStateHash() == before {
 		logx.Event("team lead completed without changing the board; retrying after cooldown")
 		return sessionFailed
 	}

@@ -32,6 +32,11 @@ type Update struct {
 // ReconcileDuplicate removes redundant copies only when every matching record
 // has identical task content. sourceSection identifies the copy to preserve.
 func ReconcileDuplicate(id, sourceSection string) (Task, error) {
+	unlock, err := lockBoard()
+	if err != nil {
+		return Task{}, err
+	}
+	defer unlock()
 	id, sourceSection = strings.TrimSpace(id), strings.TrimSpace(sourceSection)
 	if id == "" || sourceSection == "" {
 		return Task{}, fmt.Errorf("task ID and --source-section are required to reconcile duplicates")
@@ -103,21 +108,26 @@ func ReconcileDuplicate(id, sourceSection string) (Task, error) {
 			return Task{}, err
 		}
 	}
-	written := []string{}
-	for path, data := range changed {
-		if err := writeAtomic(path, data); err != nil {
-			for _, p := range written {
-				_ = writeAtomic(p, originals[p])
-			}
-			return Task{}, err
+	var changes []boardChange
+	for _, path := range boardPaths() {
+		if data, ok := changed[path]; ok {
+			changes = append(changes, boardChange{File: boardFileName(path), Before: originals[path], After: data})
 		}
-		written = append(written, path)
 	}
+	if err := commitBoardChanges(changes); err != nil {
+		return Task{}, err
+	}
+
 	return parseAllTasks(matches[keeper].data, matches[keeper].path)[id], nil
 }
 
 // CreateBacklogTask adds a fully specified, unassigned task to Backlog.
 func CreateBacklogTask(task Task) (Task, error) {
+	unlock, err := lockBoard()
+	if err != nil {
+		return Task{}, err
+	}
+	defer unlock()
 	task.ID = strings.TrimSpace(task.ID)
 	task.Title = strings.TrimSpace(task.Title)
 	if task.ID == "" || task.Title == "" || strings.TrimSpace(task.Body) == "" {
@@ -196,6 +206,11 @@ func validateDependencies(taskID, raw string) error {
 // Get returns the task with id from any board file. It deliberately reads the
 // archive too: normal scheduler reads skip historic archive sections for speed.
 func Get(id string) (Task, error) {
+	unlock, err := lockBoard()
+	if err != nil {
+		return Task{}, err
+	}
+	defer unlock()
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Task{}, fmt.Errorf("task ID is required")
@@ -216,6 +231,11 @@ func Get(id string) (Task, error) {
 // task records with matching bodies from TASKS.md. It is an explicit recovery
 // path for concatenated board snapshots; conflicting task bodies are rejected.
 func NormalizeTasks() error {
+	unlock, err := lockBoard()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	data, err := os.ReadFile(config.TasksFile)
 	if err != nil {
 		return err
@@ -317,6 +337,11 @@ func taskBody(block string) string {
 // Set applies a validated structural update. Moving a task requires both File
 // and Section so an accidental status edit can never relocate work.
 func Set(id string, update Update) (Task, error) {
+	unlock, err := lockBoard()
+	if err != nil {
+		return Task{}, err
+	}
+	defer unlock()
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Task{}, fmt.Errorf("task ID is required")
@@ -371,13 +396,11 @@ func Set(id string, update Update) (Task, error) {
 			if err := validateWholeDocument(newTarget, boardFileName(targetPath)); err != nil {
 				return Task{}, err
 			}
-			// Commit destination first so interruption cannot lose the task. If
-			// removing the source fails, restore the original destination.
-			if err := writeAtomic(targetPath, newTarget); err != nil {
-				return Task{}, err
+			changes := []boardChange{
+				{File: boardFileName(targetPath), Before: string(targetData), After: newTarget},
+				{File: boardFileName(sourcePath), Before: source.data, After: sourceCandidate},
 			}
-			if err := writeAtomic(sourcePath, sourceCandidate); err != nil {
-				_ = writeAtomic(targetPath, string(targetData))
+			if err := commitBoardChanges(changes); err != nil {
 				return Task{}, err
 			}
 		}
@@ -703,10 +726,17 @@ func writeAtomic(path, data string) error {
 		_ = tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(path))
 }
 
 func parseAllTasks(data, path string) map[string]Task {

@@ -15,8 +15,9 @@ const ControllerStateVersion = 1
 // orchestrator controller. Intent is copied from the board; runtime fields are
 // observations owned by the controller.
 type ControllerState struct {
-	Version int                     `json:"version"`
-	Leases  []ControllerWorkerLease `json:"leases"`
+	Version int                              `json:"version"`
+	Leases  []ControllerWorkerLease          `json:"leases"`
+	History map[string]ControllerWorkerLease `json:"history,omitempty"`
 }
 
 // ControllerTaskIntent is the immutable board identity for one assignment.
@@ -145,13 +146,16 @@ func ValidateControllerTransition(previous, candidate ControllerState) error {
 			return fmt.Errorf("controller transition removes role lease %q", old.Intent.Role)
 		}
 		if old.Intent != next.Intent {
-			if old.Terminal == nil || next.Attempt != 1 || old.LeaseID == next.LeaseID {
+			if old.Terminal == nil || old.LeaseID == next.LeaseID {
 				return fmt.Errorf("controller transition for role %q has invalid task replacement", old.Intent.Role)
 			}
 			continue
 		}
 		if old.LeaseID != next.LeaseID {
 			return fmt.Errorf("controller transition mutates lease identity for role %q", old.Intent.Role)
+		}
+		if next.Attempt == old.Attempt && old.Terminal != nil && next.Terminal == nil && (old.Terminal.Outcome == string(sessionCancelled) || old.Terminal.Outcome == string(sessionUsageLimited)) {
+			continue
 		}
 		if next.Attempt == old.Attempt+1 {
 			if old.Terminal == nil || next.Terminal != nil {
