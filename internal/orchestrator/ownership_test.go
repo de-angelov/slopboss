@@ -88,3 +88,17 @@ func TestUsageAndCancellationDoNotConsumeFailureAttempts(t *testing.T) {
 		})
 	}
 }
+
+func TestPlannerKeepsRunningIdleAuditOnHealthyBoard(t *testing.T) {
+	withRetryTestState(t)
+	oldFinished, oldActivity := finished, lastTeamLeadActivity
+	t.Cleanup(func() { finished, lastTeamLeadActivity = oldFinished, oldActivity })
+	finished = map[string]FinishedSession{}
+	lastTeamLeadActivity = time.Now()
+	audit := idleAuditTask(time.Now())
+	state := ControllerState{Leases: []ControllerWorkerLease{{Intent: ControllerTaskIntent{Role: teamLeadRole, TaskID: audit.Key}, LeaseID: "audit", Attempt: 1}}}
+	plan, ok := planTeamLeadAction(nil, map[string]bool{}, state, map[string]desiredSession{}, map[string]bool{})
+	if !ok || plan.TaskKey != audit.Key {
+		t.Fatalf("running healthy-board audit displaced: %#v", plan)
+	}
+}

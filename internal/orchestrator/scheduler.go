@@ -310,7 +310,7 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 		}
 		exhausted = found && lease.LeaseID == id && lease.Terminal != nil && lease.Attempt > config.MaxFailedSessionRetries && lease.Terminal.Outcome != string(sessionCancelled) && lease.Terminal.Outcome != string(sessionUsageLimited)
 	}
-	if exhausted {
+	if exhausted || candidate.TaskKey == "" {
 		lease, found := findControllerLease(durable, teamLeadRole)
 		if found && lease.Terminal == nil && strings.HasPrefix(lease.Intent.TaskID, "idle-audit\x00") {
 			audit := idleAuditTask(time.Now())
