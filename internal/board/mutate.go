@@ -170,7 +170,7 @@ func CreateBacklogTask(task Task) (Task, error) {
 	if err := writeAtomic(config.BacklogFile, candidate); err != nil {
 		return Task{}, err
 	}
-	return Get(task.ID)
+	return getTaskUnlocked(task.ID)
 }
 
 func validateTaskBody(body string) error {
@@ -211,6 +211,10 @@ func Get(id string) (Task, error) {
 		return Task{}, err
 	}
 	defer unlock()
+	return getTaskUnlocked(id)
+}
+
+func getTaskUnlocked(id string) (Task, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Task{}, fmt.Errorf("task ID is required")
