@@ -38,6 +38,67 @@ func TestTeamLeadPlannerPrioritizesFollowUpAndFallsBackToAudit(t *testing.T) {
 	}
 }
 
+func TestCompletedDecompositionRetriesAfterCooldown(t *testing.T) {
+	withRetryTestState(t)
+	oldStore, oldLaunch, oldWorkspace := controllerStateStore, launchControllerSession, controllerWorkspaceExists
+	oldRunning, oldFinished, oldPending, oldActivity := running, finished, cancelPendingSince, lastTeamLeadActivity
+	t.Cleanup(func() {
+		controllerStateStore, launchControllerSession, controllerWorkspaceExists = oldStore, oldLaunch, oldWorkspace
+		running, finished, cancelPendingSince, lastTeamLeadActivity = oldRunning, oldFinished, oldPending, oldActivity
+	})
+	controllerStateStore = NewControllerStateStore(filepath.Join(t.TempDir(), "state.json"))
+	running, finished, cancelPendingSince = map[string]RunningSession{}, map[string]FinishedSession{}, map[string]time.Time{}
+	lastTeamLeadActivity = time.Now()
+	tasks := []board.Task{{ID: "WAIT", Title: "Waiting", Section: "Backlog", Status: "Backlog", Dependencies: "MISSING"}}
+	task := decompositionTask([]string{"WAIT"})
+	finishedAt := time.Now().Add(-config.FailedSessionRetryDelay - time.Second)
+	lease := ControllerWorkerLease{
+		Intent:  ControllerTaskIntent{TaskID: controllerTaskID(task, task.Key), Role: teamLeadRole, Branch: controllerBranch(task, teamLeadRole)},
+		LeaseID: controllerLeaseID(teamLeadRole, task, task.Key), HeartbeatAt: finishedAt, Attempt: 1,
+		Terminal: &ControllerTerminalResult{Outcome: string(sessionCompleted), FinishedAt: finishedAt, Evidence: "pass completed"},
+	}
+	if err := commitControllerState(ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}); err != nil {
+		t.Fatal(err)
+	}
+	launches := 0
+	controllerWorkspaceExists = func(string) bool { return true }
+	launchControllerSession = func(role string, _ board.Task, _ string, _ []board.Task, _ string) {
+		if role == teamLeadRole {
+			launches++
+		}
+	}
+	reconcile(tasks)
+	if launches != 1 {
+		t.Fatalf("unchanged completed decomposition launched %d retries, want 1", launches)
+	}
+	state, err := loadControllerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Leases[0]; got.Attempt != 2 || got.Terminal != nil {
+		t.Fatalf("retry lease = %#v", got)
+	}
+}
+
+func TestCompletedTeamLeadPassRecoveryIsBounded(t *testing.T) {
+	for _, prefix := range []string{"decompose\x00", "unblock\x00"} {
+		task := board.Task{Key: prefix + "work"}
+		lease := ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: task.Key, Role: teamLeadRole}, LeaseID: controllerLeaseID(teamLeadRole, task, task.Key), Attempt: 1, HeartbeatAt: time.Now(), Terminal: &ControllerTerminalResult{Outcome: string(sessionCompleted), FinishedAt: time.Now(), Evidence: "finished"}}
+		state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
+		if _, launch, _ := recoveryLeaseDecision(state, teamLeadRole, lease.LeaseID); !launch {
+			t.Errorf("%q should allow retry", prefix)
+		}
+		state.Leases[0].Attempt = config.MaxFailedSessionRetries + 1
+		if _, launch, _ := recoveryLeaseDecision(state, teamLeadRole, lease.LeaseID); launch {
+			t.Errorf("%q exceeded its retry budget", prefix)
+		}
+	}
+	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: "ordinary", Role: teamLeadRole}, LeaseID: "ordinary", Attempt: 1, HeartbeatAt: time.Now(), Terminal: &ControllerTerminalResult{Outcome: string(sessionCompleted), FinishedAt: time.Now(), Evidence: "finished"}}
+	if _, launch, _ := recoveryLeaseDecision(ControllerState{Leases: []ControllerWorkerLease{lease}}, teamLeadRole, lease.LeaseID); launch {
+		t.Fatal("ordinary completed work must not retry")
+	}
+}
+
 func TestCanRetryFailedSessionAfterDelayWithoutSideEffects(t *testing.T) {
 	withRetryTestState(t)
 	now := time.Now()

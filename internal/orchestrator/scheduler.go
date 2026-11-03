@@ -109,7 +109,8 @@ func recoveryLeaseDecision(state ControllerState, role, leaseID string) (Control
 		return lease, false, "Blocked: expired worker lease has no terminal evidence; verify worker stopped before recovery"
 	}
 	if lease.LeaseID == leaseID && lease.Terminal != nil {
-		if retryableDurableResult(lease) {
+		completedPass := retryableCompletedTeamLeadPass(role, lease.Intent.TaskID, lease.Terminal.Outcome)
+		if retryableDurableResult(lease) || completedPass {
 			if lease.Attempt > config.MaxFailedSessionRetries {
 				return lease, false, fmt.Sprintf("Blocked: retry attempts exhausted (%d); Team Lead review required (%s)", lease.Attempt-1, lease.Terminal.Evidence)
 			}
@@ -124,6 +125,11 @@ func recoveryLeaseDecision(state ControllerState, role, leaseID string) (Control
 		return lease, false, ""
 	}
 	return lease, true, ""
+}
+
+func retryableCompletedTeamLeadPass(role, taskKey, outcome string) bool {
+	return role == teamLeadRole && outcome == string(sessionCompleted) &&
+		(strings.HasPrefix(taskKey, "decompose\x00") || strings.HasPrefix(taskKey, "unblock\x00"))
 }
 
 // retryableDurableResult accepts only outcomes whose controller evidence is
@@ -278,6 +284,10 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 	session, finishedCandidate := finished[teamLeadRole]
 	exhausted := finishedCandidate && session.TaskKey == candidate.TaskKey && failedSessionRetryCounts[failedSessionRetryKey(teamLeadRole, candidate.TaskKey)] >= config.MaxFailedSessionRetries
 	mu.Unlock()
+	if lease, found := findControllerLease(durable, teamLeadRole); found && candidate.TaskKey != "" &&
+		lease.LeaseID == controllerLeaseID(teamLeadRole, candidate.Task, candidate.TaskKey) && lease.Terminal != nil && lease.Attempt > config.MaxFailedSessionRetries {
+		exhausted = true
+	}
 	if candidate.TaskKey != "" && !(exhausted && due) {
 		return candidate, true
 	}
@@ -376,6 +386,9 @@ func reconcile(tasks []board.Task) {
 		}
 		leaseID := controllerLeaseID(role, task, taskKey)
 		lease, shouldLaunch, recoveryReason := recoveryLeaseDecision(durable, role, leaseID)
+		if lease.LeaseID == leaseID && lease.Terminal != nil && retryableCompletedTeamLeadPass(role, taskKey, lease.Terminal.Outcome) {
+			restoreTerminalLease(lease, task, taskKey)
+		}
 		if recoveryReason != "" {
 			recordRecoveryDecision(taskKey, recoveryReason)
 		}
