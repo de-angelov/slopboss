@@ -15,7 +15,6 @@ import (
 
 var runProvider string
 var runDetach bool
-var runManagedForeground bool
 
 var runCmd = &cobra.Command{
 	Use:         "run",
@@ -26,21 +25,19 @@ agent sessions, and start/stop backend sessions to match. Runs until
 interrupted (SIGINT/SIGTERM), then cancels in-flight sessions and exits.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if runManagedForeground {
-			return orchestrator.RunLoop(cmd.Context(), providerOrConfigured(runProvider), tui.New())
+		if runDetach {
+			return runManaged(cmd.Context(), runProvider)
 		}
-		return runManaged(cmd.Context(), runDetach, runProvider)
+		return orchestrator.RunLoop(cmd.Context(), providerOrConfigured(runProvider), tui.New())
 	},
 }
 
 func init() {
 	runCmd.Flags().StringVar(&runProvider, "provider", "", "agent backend: codex, claude, opencode, or agy (default: configured provider)")
 	runCmd.Flags().BoolVar(&runDetach, "detach", false, "start or reuse the managed dashboard without attaching")
-	runCmd.Flags().BoolVar(&runManagedForeground, "managed-foreground", false, "run inside the managed tmux session")
-	_ = runCmd.Flags().MarkHidden("managed-foreground")
 }
 
-func runManaged(ctx context.Context, detach bool, provider string) error {
+func runManaged(ctx context.Context, provider string) error {
 	session := defaultViewSession(config.RepoRoot)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return fmt.Errorf("tmux is required to manage the dashboard; install tmux and retry: %w", err)
@@ -55,19 +52,11 @@ func runManaged(ctx context.Context, detach bool, provider string) error {
 	if err := create.Run(); err != nil {
 		return fmt.Errorf("start managed dashboard session %q with tmux: %w", session, err)
 	}
-	if detach {
-		return nil
-	}
-	attach := exec.CommandContext(ctx, "tmux", "attach-session", "-t", session)
-	attach.Stdin, attach.Stdout, attach.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := attach.Run(); err != nil {
-		return fmt.Errorf("attach to managed dashboard session %q: %w (session is running; use 'slopboss view' to reconnect)", session, err)
-	}
 	return nil
 }
 
 func managedSessionCommand(executable, boardRoot, provider string) []string {
-	args := []string{"--dir", boardRoot, "run", "--managed-foreground"}
+	args := []string{"--dir", boardRoot, "run"}
 	if provider != "" {
 		args = append(args, "--provider", provider)
 	}

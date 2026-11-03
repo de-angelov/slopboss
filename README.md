@@ -31,12 +31,13 @@ slopboss reads a plain-Markdown task board, spins up a team of AI coding agents
 continuously reconciled with the board — assigning work, isolating each agent in
 its own git workspace, and shutting sessions down as tasks land on `main`.
 
-Everything the agents coordinate through is a **file you can read, edit, and
-commit** — no database, no hidden state. The files are watched. The files are law.
+Agents coordinate through readable, editable Markdown files. The controller also
+stores local recovery state in `workspaces/controller-state.json`, including
+worker leases and retry attempts; that file affects recovery across restarts.
 
 ### WHY SLOPBOSS?
 
-- **THE BOARD IS LAW** — `BACKLOG.md`, `TASKS.md`, and `ARCHIVE.md` are human-readable Markdown. Edit the board and the running fleet converges to it. No database. No shadow state.
+- **THE BOARD IS LAW** — `BACKLOG.md`, `TASKS.md`, and `ARCHIVE.md` are human-readable Markdown. Edit the board and the running fleet converges to it.
 - **RECONCILE, DON'T FIRE-AND-FORGET** — a control loop keeps live sessions in sync with the board every few seconds, so hand edits and agent edits both take effect.
 - **A REAL DIVISION OF LABOR** — one Team Lead grooms and prioritizes; N Dev Agents execute in parallel, each in its own cloned workspace and branch.
 - **PLUGGABLE BACKENDS** — run on **Codex** (default), **Claude Code**, **OpenCode**, or **Antigravity** with a flag.
@@ -67,6 +68,7 @@ go build -o slopboss ./cmd/slopboss
 > [Claude Code](https://docs.claude.com/en/docs/claude-code) (`--provider claude`),
 > [OpenCode](https://github.com/sst/opencode) (`--provider opencode`), or
 > [Antigravity](https://antigravity.google) (`--provider agy`).
+> `tmux` is also required for `run --detach` and `view`.
 
 ---
 
@@ -101,6 +103,8 @@ slopboss run
 
 `run` opens a live TUI and keeps working until you press `Ctrl-C` (or send
 `SIGTERM`), at which point it cancels in-flight sessions and exits cleanly.
+To run in a detached tmux session, use `slopboss run --detach`; reconnect with
+`slopboss view`.
 
 > **WHERE TO RUN IT:** slopboss resolves which board to use in this order —
 > `--dir <board>` if given, else the current directory if it's a board, else the
@@ -171,6 +175,7 @@ dependent tasks never get stuck behind a session that was cancelled mid-completi
 | FLAG | COMMANDS | DEFAULT | DESCRIPTION |
 | --- | --- | --- | --- |
 | `--provider` | `run`, `groom`, `setup`, `eval run`, `eval groom` | persisted (`codex`) | Agent backend: `codex`, `claude`, `opencode`, or `agy`. `setup` **persists** your choice to `CONFIG.md`, and the other commands default to it. |
+| `--detach` | `run` | `false` | Start or reuse a detached tmux session; attach with `slopboss view`. |
 | `--dir` | **all commands** (global) | current directory | Board directory to operate in — run any command against a board from anywhere without `cd`. |
 | `--repo` | `setup` | — (prompted) | Product repository to clone into each workspace. |
 | `--ssh-url` | `setup` | `--repo` | Origin URL to set after cloning. |

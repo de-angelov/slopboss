@@ -112,9 +112,8 @@ var (
 	RepoURL = settingOr("product repo", "")
 )
 
-// Settings is slopboss's persisted, per-board configuration. slopboss keeps all
-// its state in Markdown (never JSON), so it is stored in CONFIG.md as
-// "- Key: Value" bullets — the same convention as the board and experiment files.
+// Settings is slopboss's persisted, per-board configuration, stored in
+// CONFIG.md as "- Key: Value" bullets.
 type Settings struct {
 	RepoURL               string
 	BaseBranch            string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -23,6 +24,7 @@ func RunLoop(parent context.Context, providerName string, ui UI) error {
 		return err
 	}
 	sessionProvider = p
+	controllerStateStore = NewControllerStateStore(filepath.Join(config.WorkspacesRoot, "controller-state.json"))
 
 	config.DevAgentCount = config.DiscoverDevAgentCount()
 

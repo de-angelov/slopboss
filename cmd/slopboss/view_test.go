@@ -13,16 +13,16 @@ func TestDefaultViewSessionUsesBoardName(t *testing.T) {
 
 func TestManagedSessionCommandEntersForegroundMode(t *testing.T) {
 	got := managedSessionCommand("/usr/local/bin/slopboss", "/work/funscript-board", "claude")
-	want := []string{"/usr/local/bin/slopboss", "--dir", "/work/funscript-board", "run", "--managed-foreground", "--provider", "claude"}
+	want := []string{"/usr/local/bin/slopboss", "--dir", "/work/funscript-board", "run", "--provider", "claude"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("managedSessionCommand = %#v, want %#v", got, want)
 	}
 }
 
 func TestManagedSessionArgsCreatesOrReusesDetachedSession(t *testing.T) {
-	command := []string{"/usr/bin/slopboss", "--dir", "/work/funscript-board", "run", "--managed-foreground"}
+	command := []string{"/usr/bin/slopboss", "--dir", "/work/funscript-board", "run"}
 	got := managedSessionArgs("slopboss-funscript", "/work/funscript-board", command)
-	want := []string{"new-session", "-Ad", "-s", "slopboss-funscript", "-c", "/work/funscript-board", "/usr/bin/slopboss", "--dir", "/work/funscript-board", "run", "--managed-foreground"}
+	want := []string{"new-session", "-Ad", "-s", "slopboss-funscript", "-c", "/work/funscript-board", "/usr/bin/slopboss", "--dir", "/work/funscript-board", "run"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("managedSessionArgs = %#v, want %#v", got, want)
 	}
