@@ -315,8 +315,12 @@ next state before assigning new work:
 
 1. **Merged** — verify the squash commit is on the product base branch, then
    archive the task as Done.
-2. **Ready to merge** — record the focused verification result and direct the
-   owning agent to rebase, verify, squash-merge, and archive it.
+2. **Ready to merge** — verify the branch with focused verification. You may
+   rebase, squash-merge, and push to the base branch yourself, then archive the
+   task as Done. If you need the owning agent to rebase or push instead, you MUST
+   resume the worker with: slopboss board resume TASK-ID --reason "rebase onto origin/<base> and push".
+   NEVER write markdown notes directing the agent in TASKS.md — finished workers
+   cannot see notes and will not restart without board resume.
 3. **Blocked** — record the exact failing command, the owning task or human
    dependency, and the smallest dependency-ordered unblocker. Then run the
    Blocked Task Recovery protocol above before assigning anything else: move the

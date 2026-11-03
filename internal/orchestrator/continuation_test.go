@@ -90,3 +90,30 @@ func TestContinuationRequiresMatchingTerminalEvidence(t *testing.T) {
 		t.Fatal("accepted evidence for different task")
 	}
 }
+
+func TestCompletionFollowUpTaskInstructsResume(t *testing.T) {
+	mu.Lock()
+	oldFinished := finished
+	finished = map[string]FinishedSession{
+		devAgent1Role: {
+			Outcome: sessionCompleted,
+			Task:    "A",
+			TaskKey: "key-a",
+		},
+	}
+	mu.Unlock()
+	defer func() {
+		mu.Lock()
+		finished = oldFinished
+		mu.Unlock()
+	}()
+
+	task, ok := completionFollowUpTask()
+	if !ok {
+		t.Fatal("expected completion follow up task")
+	}
+	if !strings.Contains(task.Body, "board resume TASK-ID") {
+		t.Errorf("expected follow up body to instruct board resume, got:\n%s", task.Body)
+	}
+}
+

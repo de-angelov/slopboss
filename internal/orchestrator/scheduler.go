@@ -578,7 +578,13 @@ func completionFollowUpTask() (board.Task, bool) {
 
 	body := `Dev-agent sessions have ended. Perform a board-only completion follow-up before assigning new work.
 
-For every session listed below, inspect its task's current board state and choose exactly one outcome: merged and archived; ready to merge with focused verification recorded; blocked with the exact failing command and owner; or requeued with corrected scope/dependencies. A completed session is not proof of a merge. Do not modify product code or inspect unrelated branches.
+For every session listed below, inspect its task's current board state and choose exactly one outcome:
+1. Merged and archived — verify the squash commit is on the base branch, then archive as Done.
+2. Ready to merge — if tests pass, you may rebase, squash-merge, and push to the base branch yourself, then archive. If you direct the owning dev agent to rebase or push instead, you MUST run: slopboss board resume TASK-ID --reason "specific instructions". Do NOT write markdown notes directing the agent in TASKS.md — finished agents will not run without board resume.
+3. Blocked — record the exact failing command and blocker, and move the task out of the lane.
+4. Requeued — move back to backlog with corrected scope and dependencies.
+
+A completed session is not proof of a merge. Do not modify product code or inspect unrelated branches.
 
 Ended sessions:
 - ` + strings.Join(entries, "\n- ")

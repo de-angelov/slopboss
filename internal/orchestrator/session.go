@@ -148,7 +148,7 @@ Decide the next useful coordination actions from the supplied board and worker s
 	}
 	executable, err := os.Executable()
 	if err == nil {
-		rules += "\nUse this exact command prefix for board operations: " + shellQuote(executable) + " --dir " + shellQuote(config.RepoRoot) + ". Never use a different slopboss from PATH. To clear a completed task from Awaiting Human Input, use this prefix with board clear-human TASK-ID.\n"
+		rules += "\nUse this exact command prefix for board operations: " + shellQuote(executable) + " --dir " + shellQuote(config.RepoRoot) + ". Never use a different slopboss from PATH. To clear a completed task from Awaiting Human Input, use this prefix with board clear-human TASK-ID. To resume a finished dev agent to rebase or continue work, use this prefix with board resume TASK-ID --reason \"specific instructions\". Never write markdown messages to dev agents in task bodies or TASKS.md; finished workers do not read them and will not restart without board resume.\n"
 	}
 	var reportPath string
 	if isAgentLeadTask(task) {
