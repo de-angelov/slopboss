@@ -128,7 +128,7 @@ func (s *ControllerStateStore) Commit(candidate ControllerState) error {
 // ValidateControllerTransition enforces the lifecycle of each durable lease.
 // A retry keeps its deterministic lease ID and intent while advancing the
 // attempt and clearing the prior terminal result. A new task may replace a
-// terminal lease for the role and starts at attempt one.
+// terminal lease for the role, retaining any prior attempt count for that assignment.
 func ValidateControllerTransition(previous, candidate ControllerState) error {
 	if err := ValidateControllerState(previous); err != nil {
 		return fmt.Errorf("invalid prior controller state: %w", err)
@@ -145,14 +145,13 @@ func ValidateControllerTransition(previous, candidate ControllerState) error {
 		if !exists {
 			return fmt.Errorf("controller transition removes role lease %q", old.Intent.Role)
 		}
-		if old.Intent != next.Intent {
-			if old.Terminal == nil || old.LeaseID == next.LeaseID {
+		if old.Intent != next.Intent || old.LeaseID != next.LeaseID {
+			// A schedule key can change while task intent stays the same. It
+			// identifies a new assignment, but only after the old one ends.
+			if old.Terminal == nil || old.LeaseID == next.LeaseID || next.Terminal != nil {
 				return fmt.Errorf("controller transition for role %q has invalid task replacement", old.Intent.Role)
 			}
 			continue
-		}
-		if old.LeaseID != next.LeaseID {
-			return fmt.Errorf("controller transition mutates lease identity for role %q", old.Intent.Role)
 		}
 		if next.Attempt == old.Attempt && old.Terminal != nil && next.Terminal == nil && (old.Terminal.Outcome == string(sessionCancelled) || old.Terminal.Outcome == string(sessionUsageLimited)) {
 			continue

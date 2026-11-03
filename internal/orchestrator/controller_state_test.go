@@ -188,7 +188,7 @@ func TestControllerStaleLaunchSnapshotRejectsThenRecovers(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	lease := func(task, role string) ControllerWorkerLease {
 		return ControllerWorkerLease{
-			Intent: ControllerTaskIntent{TaskID: task, Role: role, Branch: "branch/" + task},
+			Intent:  ControllerTaskIntent{TaskID: task, Role: role, Branch: "branch/" + task},
 			LeaseID: "lease-" + task, HeartbeatAt: now, Attempt: 1,
 		}
 	}
@@ -224,5 +224,22 @@ func TestControllerStaleLaunchSnapshotRejectsThenRecovers(t *testing.T) {
 	}
 	if len(persisted.Leases) != 2 {
 		t.Fatalf("recovered state has %d leases, want 2: %#v", len(persisted.Leases), persisted.Leases)
+	}
+}
+
+func TestControllerTransitionAllowsNewScheduleForSameTask(t *testing.T) {
+	old := validControllerState()
+	next := old
+	next.Leases = append([]ControllerWorkerLease(nil), old.Leases...)
+	next.Leases[0].LeaseID = "new-schedule-key"
+	next.Leases[0].Attempt = 1
+	next.Leases[0].Terminal = nil
+	if err := ValidateControllerTransition(old, next); err != nil {
+		t.Fatalf("terminal assignment could not be replaced: %v", err)
+	}
+	old.Leases = append([]ControllerWorkerLease(nil), old.Leases...)
+	old.Leases[0].Terminal = nil
+	if err := ValidateControllerTransition(old, next); err == nil {
+		t.Fatal("replaced an active assignment")
 	}
 }
