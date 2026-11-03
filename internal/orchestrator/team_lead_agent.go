@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -65,12 +66,18 @@ func coordinationAction(tasks []board.Task, done map[string]bool, durable Contro
 	raw, _ := json.Marshal(snapshot)
 	sum := sha256.Sum256(raw)
 	key := agentLeadPrefix + hex.EncodeToString(sum[:])
-	body := fmt.Sprintf(`Choose the most useful next coordination action using the snapshot below and the board tools. Review completed or failed worker sessions, assign ready work, investigate blockers, or make no changes if the board needs no action. A worker's process result alone does not prove its work was merged. Inspect the relevant task and evidence before changing its state. Use slopboss --dir <board-root> board assign TASK-ID "Dev Agent N" for assignments. If a finished worker must continue the same task, use slopboss --dir <board-root> board resume TASK-ID --reason "specific next step". Use structural slopboss board commands for other board updates; do not edit board files directly. Do not make product-code changes. If a worker is unresolved, do not assume it stopped or reassign its work. Explain decisions and any uncertainty in your final response.
+	executable, err := os.Executable()
+	if err != nil {
+		executable = "slopboss"
+	}
+	cli := shellQuote(executable) + " --dir " + shellQuote(config.RepoRoot)
+	body := fmt.Sprintf(`Use this exact command prefix for every board operation: %s. Do not rely on PATH or another installed slopboss binary.
+Choose the most useful next coordination action using the snapshot below and the board tools. Review completed or failed worker sessions, assign ready work, investigate blockers, or make no changes if the board needs no action. A worker's process result alone does not prove its work was merged. Inspect the relevant task and evidence before changing its state. Use the command prefix followed by board assign TASK-ID "Dev Agent N" for assignments. If a finished worker must continue the same task, use the prefix followed by board resume TASK-ID --reason "specific next step". Use structural slopboss board commands for other board updates; do not edit board files directly. Do not make product-code changes. If a worker is unresolved, do not assume it stopped or reassign its work. Explain decisions and any uncertainty in your final response.
 
 The snapshot records the last durable worker leases, not a guarantee of current process liveness. Task body hashes detect changes; use slopboss board get TASK-ID to inspect a task's full body.
 
 Snapshot:
-%s`, string(raw))
+%s`, cli, string(raw))
 	task := board.Task{Section: agentLeadSection, Title: "Coordinate the board", Status: "In Progress", Body: body, Key: key}
 	return desiredSession{Task: task, TaskKey: key}
 }
@@ -78,3 +85,6 @@ Snapshot:
 func isAgentLeadTask(task board.Task) bool {
 	return task.Section == agentLeadSection && strings.HasPrefix(task.Key, agentLeadPrefix)
 }
+
+// shellQuote makes a concrete executable or board path safe to copy into a shell.
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }

@@ -58,9 +58,21 @@ func RunLoopWithMode(parent context.Context, providerName, mode string, ui UI) e
 
 	// Stop the TUI when the process is signalled (SIGTERM, or SIGINT that isn't
 	// consumed by the terminal as Ctrl-C).
+	uiExited := make(chan struct{})
+	watcherDone := make(chan struct{})
 	go func() {
-		<-ctx.Done()
-		ui.Stop()
+		defer close(watcherDone)
+		select {
+		case <-uiExited:
+			return
+		case <-ctx.Done():
+			select {
+			case <-uiExited:
+				return
+			default:
+			}
+			ui.Stop()
+		}
 	}()
 
 	// Reconcile loop: poll the board and converge sessions on PollInterval.
@@ -127,8 +139,10 @@ func RunLoopWithMode(parent context.Context, providerName, mode string, ui UI) e
 	}()
 
 	runErr := ui.Run()
+	close(uiExited)
 
 	stop() // wind down the loop goroutines
+	<-watcherDone
 	<-reconcileDone
 	logx.Event("shutting down; stopping running sessions")
 	shutdownSessions()

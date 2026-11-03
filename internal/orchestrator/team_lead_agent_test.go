@@ -1,7 +1,9 @@
 package orchestrator
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,5 +118,19 @@ func TestCoordinationUnresolvedLeaseDoesNotRelaunchAfterRestart(t *testing.T) {
 	}
 	if Snapshot().RecoveryByRole[teamLeadRole] == "" {
 		t.Fatal("unresolved lease was hidden from dashboard")
+	}
+}
+
+func TestCoordinationUsesExactControllerExecutable(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := coordinationAction(nil, nil, ControllerState{})
+	if !strings.Contains(action.Task.Body, shellQuote(executable)+" --dir "+shellQuote(config.RepoRoot)) {
+		t.Fatalf("coordination prompt omitted exact executable: %s", action.Task.Body)
+	}
+	if got := shellQuote("/tmp/a'b"); got != "'/tmp/a'\\''b'" {
+		t.Fatalf("shellQuote = %q", got)
 	}
 }
