@@ -88,8 +88,30 @@ func LandCompletedTask(ctx context.Context, task board.Task, role, workspace str
 
 	// Step 2: Check if branch has commits ahead of origin/baseBranch.
 	ahead, err := git.CommitsAheadOfBase(workspace, task.Branch, config.BaseBranch)
-	if err != nil || ahead == 0 {
-		return sessionFailed, fmt.Sprintf("no commits found on %s ahead of origin/%s (ahead=%d, err=%v)", task.Branch, config.BaseBranch, ahead, err)
+	if err != nil {
+		return sessionFailed, fmt.Sprintf("failed to determine commits ahead of origin/%s: %v", config.BaseBranch, err)
+	}
+	if ahead == 0 {
+		// Zero-commit task (e.g. audit, investigation, or characterization where findings
+		// are recorded in the task prose or no code diff was required).
+		if verificationCmd != "" {
+			logx.Event("merge train: running verification for zero-commit task %s: %s", task.ID, verificationCmd)
+			if err := RunCommandInWorkspace(ctx, workspace, verificationCmd); err != nil {
+				return sessionFailed, fmt.Sprintf("zero-commit task %s failed verification: %v", task.ID, err)
+			}
+		}
+		today := time.Now().Format("2006-01-02")
+		_, err = board.Set(task.ID, board.Update{
+			File:      "archive",
+			Section:   "Done",
+			Status:    "Done",
+			Completed: today,
+		})
+		if err != nil {
+			return sessionFailed, fmt.Sprintf("failed to archive zero-commit task %s: %v", task.ID, err)
+		}
+		logx.Event("merge train: completed zero-commit task %s and moved to archive", task.ID)
+		return sessionCompleted, "archived zero-commit task (audit/verification passed)"
 	}
 
 	// Step 3: Extract author commit message.

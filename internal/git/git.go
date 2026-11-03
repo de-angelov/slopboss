@@ -313,28 +313,61 @@ func RebaseOnto(workspace, upstream string) error {
 
 // SquashMergeAndPush checkouts baseBranch, pulls latest, squash-merges branch,
 // commits with commitMessage, pushes to origin, and returns the resulting squash commit hash.
+// It retries on concurrent push collisions and tolerates squash merges where the changes
+// are already present on baseBranch.
 func SquashMergeAndPush(workspace, branch, baseBranch, commitMessage string) (string, error) {
-	if err := RunGitChecked(workspace, "checkout", baseBranch); err != nil {
-		return "", err
+	const maxRetries = 3
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			logx.Event("retrying squash merge and push for %s (attempt %d/%d)", branch, attempt, maxRetries)
+		}
+
+		if err := RunGitChecked(workspace, "checkout", baseBranch); err != nil {
+			lastErr = err
+			continue
+		}
+		if err := RunGitChecked(workspace, "fetch", "origin", baseBranch); err != nil {
+			lastErr = err
+			continue
+		}
+		if err := RunGitChecked(workspace, "reset", "--hard", "origin/"+baseBranch); err != nil {
+			lastErr = err
+			continue
+		}
+		if err := RunGitChecked(workspace, "merge", "--squash", branch); err != nil {
+			_ = RunGitChecked(workspace, "reset", "--hard", "HEAD")
+			lastErr = err
+			continue
+		}
+		if !WorkspaceHasStagedChanges(workspace) {
+			logx.Event("squash merge of %s produced no new changes (already on %s)", branch, baseBranch)
+			commitHash, err := GitOutput(workspace, "rev-parse", "HEAD")
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			return strings.TrimSpace(commitHash), nil
+		}
+		if err := RunGitChecked(workspace, "commit", "-m", commitMessage); err != nil {
+			_ = RunGitChecked(workspace, "reset", "--hard", "HEAD")
+			lastErr = err
+			continue
+		}
+		commitHash, err := GitOutput(workspace, "rev-parse", "HEAD")
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		commitHash = strings.TrimSpace(commitHash)
+		if err := RunGitChecked(workspace, "push", "origin", baseBranch); err != nil {
+			_ = RunGitChecked(workspace, "reset", "--hard", "origin/"+baseBranch)
+			lastErr = err
+			continue
+		}
+		return commitHash, nil
 	}
-	if err := RunGitChecked(workspace, "pull", "--ff-only", "origin", baseBranch); err != nil {
-		return "", err
-	}
-	if err := RunGitChecked(workspace, "merge", "--squash", branch); err != nil {
-		_ = RunGitChecked(workspace, "reset", "--hard", "HEAD")
-		return "", err
-	}
-	if err := RunGitChecked(workspace, "commit", "-m", commitMessage); err != nil {
-		_ = RunGitChecked(workspace, "reset", "--hard", "HEAD")
-		return "", err
-	}
-	commitHash, err := GitOutput(workspace, "rev-parse", "HEAD")
-	if err != nil {
-		return "", err
-	}
-	commitHash = strings.TrimSpace(commitHash)
-	if err := RunGitChecked(workspace, "push", "origin", baseBranch); err != nil {
-		return "", err
-	}
-	return commitHash, nil
+	return "", fmt.Errorf("squash merge or push failed after %d attempts: %w", maxRetries, lastErr)
 }

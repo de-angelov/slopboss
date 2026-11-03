@@ -159,6 +159,76 @@ func TestLandCompletedTaskAutoCommitsAndSquashes(t *testing.T) {
 	}
 }
 
+func TestLandCompletedTaskZeroCommitAudit(t *testing.T) {
+	tempDir := t.TempDir()
+	remoteDir := filepath.Join(tempDir, "remote.git")
+	workspace := filepath.Join(tempDir, "workspace")
+
+	runCmd(t, tempDir, "git", "init", "--bare", "-b", "main", remoteDir)
+	runCmd(t, tempDir, "git", "clone", remoteDir, workspace)
+	runCmd(t, workspace, "git", "config", "user.email", "test@example.com")
+	runCmd(t, workspace, "git", "config", "user.name", "Test User")
+
+	initialFile := filepath.Join(workspace, "README.md")
+	if err := os.WriteFile(initialFile, []byte("# Initial\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runCmd(t, workspace, "git", "add", "README.md")
+	runCmd(t, workspace, "git", "commit", "-m", "initial commit")
+	runCmd(t, workspace, "git", "push", "origin", "main")
+
+	boardDir := filepath.Join(tempDir, "board")
+	if err := os.MkdirAll(boardDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tasksFile := filepath.Join(boardDir, "TASKS.md")
+	archiveFile := filepath.Join(boardDir, "ARCHIVE.md")
+	backlogFile := filepath.Join(boardDir, "BACKLOG.md")
+
+	taskContent := "# TASKS\n\n## Dev Agent 2 In Progress\n\n### Audit precedence\nTask ID: TASK-079\nOwner: Dev Agent 2\nBranch: agent/2/audit\nStatus: In Progress\n\nObjective: Audit precedence\nVerification: test -f README.md\n"
+	if err := os.WriteFile(tasksFile, []byte(taskContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archiveFile, []byte("# ARCHIVE\n\n## Done\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backlogFile, []byte("# BACKLOG\n\n## Backlog\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config.RepoRoot = boardDir
+	config.TasksFile = tasksFile
+	config.ArchiveFile = archiveFile
+	config.BacklogFile = backlogFile
+	config.BaseBranch = "main"
+
+	// Create branch matching main (0 commits ahead)
+	runCmd(t, workspace, "git", "checkout", "-b", "agent/2/audit")
+
+	task := board.Task{
+		ID:     "TASK-079",
+		Title:  "Audit precedence",
+		Owner:  "Dev Agent 2",
+		Branch: "agent/2/audit",
+		Status: "In Progress",
+		Body:   "Objective: Audit precedence\nVerification: test -f README.md",
+	}
+
+	outcome, evidence := LandCompletedTask(context.Background(), task, "Dev Agent 2", workspace)
+	if outcome != sessionCompleted {
+		t.Fatalf("LandCompletedTask failed for zero-commit task: outcome=%v, evidence=%s", outcome, evidence)
+	}
+
+	archiveData, err := os.ReadFile(archiveFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(archiveData), "TASK-079") {
+		t.Fatalf("expected ARCHIVE.md to contain TASK-079, got: %s", string(archiveData))
+	}
+}
+
 func runCmd(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...)

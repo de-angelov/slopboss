@@ -8,7 +8,7 @@ import (
 var (
 	verificationSectionRe = regexp.MustCompile(`(?i)(?:^|\n)##+\s*Verification\s*\n([^#]+)`)
 	codeFenceRe           = regexp.MustCompile("(?s)```(?:sh|bash)?\\s*\\n?(.*?)\\n?```")
-	fullSuiteDiagnosticRe = regexp.MustCompile(`(?i)\s*Full-suite diagnostic:.*$`)
+	fullSuiteDiagnosticRe = regexp.MustCompile(`(?i)\s*(?:Full-suite diagnostic|Diagnostic full suite|Diagnostic suite|Full-suite|Diagnostic):.*$`)
 )
 
 // ExtractVerification parses the targeted verification command from a task body.

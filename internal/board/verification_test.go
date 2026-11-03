@@ -26,6 +26,11 @@ func TestExtractVerification(t *testing.T) {
 			want: "npx vitest run tests/formatter.test.ts --reporter=dot; npm run build",
 		},
 		{
+			name: "inline with diagnostic full suite wording",
+			body: "Objective: foo\nVerification: npx vitest run tests/formatter.test.ts tests/parser.test.ts --reporter=dot; npm run build. Diagnostic full suite: npm test.",
+			want: "npx vitest run tests/formatter.test.ts tests/parser.test.ts --reporter=dot; npm run build",
+		},
+		{
 			name: "section with code fence",
 			body: "## Objective\nfoo\n\n## Verification\n```sh\nnpm test\n```\n",
 			want: "npm test",
