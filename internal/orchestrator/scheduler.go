@@ -326,10 +326,15 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 	}
 
 	// If all useful Team Lead work is exhausted, run a small periodic board
-	// health pass. Its time-bucketed key prevents the loop from launching it on
-	// every poll; session start time provides the 30-minute quiet interval.
+	// health pass if enabled. Its time-bucketed key prevents the loop from launching it on
+	// every poll; session start time provides the quiet interval.
+	if !config.IdleAuditsEnabled() {
+		return desiredSession{}, false
+	}
+
+	auditInterval := config.IdleAuditInterval()
 	mu.Lock()
-	due := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= teamLeadIdleAuditInterval
+	due := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= auditInterval
 	mu.Unlock()
 	exhausted := false
 	if candidate.TaskKey != "" {
@@ -355,6 +360,17 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 		logx.Event("%s retries exhausted for %v; escalating to idle audit", candidate.Task.Section, candidate.TaskKey)
 	}
 	if due {
+		currHash := boardStateHash()
+		mu.Lock()
+		unchanged := currHash != "" && currHash == lastAuditedBoardHash
+		if unchanged {
+			lastTeamLeadActivity = time.Now()
+			mu.Unlock()
+			logx.Event("skipping periodic board review: board unchanged since last audit")
+			return desiredSession{}, false
+		}
+		mu.Unlock()
+
 		audit := idleAuditTask(time.Now())
 		return desiredSession{Task: audit, TaskKey: audit.Key}, true
 	}
@@ -371,6 +387,7 @@ func reconcileWithMode(tasks []board.Task, mode string) {
 		logx.Event("cannot load controller state; refusing launches: %v", err)
 		return
 	}
+	consumePendingRetryRequestsLocked(controllerStateStore, &durable)
 	mu.Lock()
 	recoveryByRole = map[string]string{}
 	for _, lease := range durable.Leases {
@@ -675,7 +692,11 @@ func decompositionTask(blockedIDs []string) board.Task {
 }
 
 func idleAuditTask(now time.Time) board.Task {
-	window := now.Unix() / int64(teamLeadIdleAuditInterval.Seconds())
+	interval := config.IdleAuditInterval()
+	if interval <= 0 {
+		interval = time.Hour
+	}
+	window := now.Unix() / int64(interval.Seconds())
 	return board.Task{
 		Section: teamLeadIdleAuditSection,
 		Title:   "Periodic board health review",

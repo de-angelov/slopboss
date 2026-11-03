@@ -23,6 +23,7 @@ type Update struct {
 	Dependencies       string
 	BlockedBy          string
 	ClearBlockedBy     bool
+	Completed          string
 	File               string
 	Section            string
 	SourceSection      string
@@ -621,6 +622,9 @@ func applyMetadata(block string, u Update) string {
 	if u.BlockedBy != "" {
 		values["blocked by"] = u.BlockedBy
 	}
+	if u.Completed != "" {
+		values["completed"] = u.Completed
+	}
 
 	lines := strings.Split(block, "\n")
 	seen := map[string]bool{}
@@ -636,7 +640,7 @@ func applyMetadata(block string, u Update) string {
 		}
 	}
 	var add []string
-	for _, key := range []string{"owner", "branch", "status", "category", "dependencies", "blocked by"} {
+	for _, key := range []string{"owner", "branch", "status", "completed", "category", "dependencies", "blocked by"} {
 		if value, ok := values[key]; ok && !seen[key] {
 			add = append(add, canonicalMetadataKey(key)+": "+value)
 		}

@@ -40,6 +40,7 @@ var (
 	recoveryByRole            = map[string]string{}
 	codexPausedUntil          time.Time
 	lastTeamLeadActivity      time.Time
+	lastAuditedBoardHash      string
 	controllerStateStore      = NewControllerStateStore(config.RepoRoot + "/workspaces/controller-state.json")
 	launchControllerSession   = startSession
 	controllerWorkspaceExists = git.WorkspaceExists

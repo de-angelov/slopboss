@@ -271,3 +271,70 @@ func remoteBranchExists(dir string, ref string) bool {
 	cmd.Dir = dir
 	return cmd.Run() == nil
 }
+
+// LastCommitMessage returns the full commit message of the latest commit on branch (or HEAD).
+func LastCommitMessage(workspace, branch string) (string, error) {
+	ref := "HEAD"
+	if branch != "" {
+		ref = branch
+	}
+	return GitOutput(workspace, "log", "-1", "--pretty=format:%B", ref)
+}
+
+// CommitsAheadOfBase returns how many commits branch is ahead of origin/baseBranch.
+func CommitsAheadOfBase(workspace, branch, baseBranch string) (int, error) {
+	out, err := GitOutput(workspace, "rev-list", "--count", "origin/"+baseBranch+".."+branch)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(out))
+}
+
+// CommitAll stages all changes and creates a commit with the provided message.
+func CommitAll(workspace, message string) error {
+	if err := RunGitChecked(workspace, "add", "-A"); err != nil {
+		return err
+	}
+	return RunGitChecked(workspace, "commit", "-m", message)
+}
+
+// RebaseOnto rebases the current branch onto upstream. If it fails, it aborts the rebase.
+func RebaseOnto(workspace, upstream string) error {
+	cmd := exec.Command("git", "rebase", upstream)
+	cmd.Dir = workspace
+	cmd.Stdout = logx.Writer{}
+	cmd.Stderr = logx.Writer{}
+	if err := cmd.Run(); err != nil {
+		_ = RunGitChecked(workspace, "rebase", "--abort")
+		return fmt.Errorf("git rebase %s failed: %w", upstream, err)
+	}
+	return nil
+}
+
+// SquashMergeAndPush checkouts baseBranch, pulls latest, squash-merges branch,
+// commits with commitMessage, pushes to origin, and returns the resulting squash commit hash.
+func SquashMergeAndPush(workspace, branch, baseBranch, commitMessage string) (string, error) {
+	if err := RunGitChecked(workspace, "checkout", baseBranch); err != nil {
+		return "", err
+	}
+	if err := RunGitChecked(workspace, "pull", "--ff-only", "origin", baseBranch); err != nil {
+		return "", err
+	}
+	if err := RunGitChecked(workspace, "merge", "--squash", branch); err != nil {
+		_ = RunGitChecked(workspace, "reset", "--hard", "HEAD")
+		return "", err
+	}
+	if err := RunGitChecked(workspace, "commit", "-m", commitMessage); err != nil {
+		_ = RunGitChecked(workspace, "reset", "--hard", "HEAD")
+		return "", err
+	}
+	commitHash, err := GitOutput(workspace, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	commitHash = strings.TrimSpace(commitHash)
+	if err := RunGitChecked(workspace, "push", "origin", baseBranch); err != nil {
+		return "", err
+	}
+	return commitHash, nil
+}

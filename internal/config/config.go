@@ -28,6 +28,7 @@ const (
 	// steering. A session that hits the cap simply resumes from the updated board
 	// on the next poll, so capping never loses work.
 	TeamLeadMaxTurns = 20
+	IdleAuditMaxTurns = 5
 
 	// DevAgentMaxTurns hard-caps the agentic turns of a dev-agent task
 	// session. Focused micro-tasks finish within 5-10 turns. Capping at 15
@@ -51,12 +52,13 @@ const (
 	// DevAgentModel remains the backwards-compatible fallback for Codex boards
 	// created before provider model settings existed. New boards persist this in
 	// CONFIG.md as "Codex dev-agent model" instead.
-	DevAgentModel = "gpt-6-luna"
-
-	// DefaultProviderName selects the agent backend; codex is the default and
-	// --provider switches it.
 	DefaultProviderName = "codex"
+	DevAgentModel       = "gpt-6-luna"
+	TeamLeadModel       = "gpt-5-mini"
 	ClaudeDevModel      = "claude-sonnet-5"
+	ClaudeTeamLeadModel = "claude-haiku-4.5"
+	AgyDevModel         = "gemini-3.8-pro"
+	AgyTeamLeadModel    = "gemini-3.8-flash"
 )
 
 // Role identities used across scheduling, prompting, and the UI.
@@ -235,25 +237,70 @@ func loadDevAgents() int {
 	return DefaultDevAgents
 }
 
-// ProviderModel resolves a board-configured model for a provider and role.
-// Role-specific settings take precedence over a provider-wide model, so a board
-// can use a cheaper model for grooming while reserving a stronger one for dev
-// tasks. An empty configured value deliberately defers to the backend default.
-func ProviderModel(provider, role string) string {
+// IdleAuditsEnabled reports whether periodic board health reviews are enabled in CONFIG.md.
+// Configured via "- Idle audits: on/off" or "- Periodic review: on/off".
+func IdleAuditsEnabled() bool {
+	val := strings.ToLower(strings.TrimSpace(settingOr("idle audits", settingOr("periodic review", "on"))))
+	return val != "off" && val != "false" && val != "no" && val != "0" && val != "disabled"
+}
+
+// IdleAuditInterval returns the configured interval between periodic health reviews.
+// Configured via "- Idle audit interval: 1h" or "- Periodic review interval: 1h". Defaults to 1h.
+func IdleAuditInterval() time.Duration {
+	if !IdleAuditsEnabled() {
+		return 0
+	}
+	raw := settingOr("idle audit interval", settingOr("periodic review interval", "1h"))
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	return time.Hour
+}
+
+// ProviderModel resolves a board-configured model for a provider, role, and optional task category.
+// Precedence:
+// 1. Task category model (e.g. "- Codex docs model: ...", "- Docs model: ...")
+// 2. Role-specific provider setting (e.g. "- Codex team-lead model: ...")
+// 3. Generic role setting (e.g. "- Team-lead model: ...")
+// 4. Provider-wide model setting (e.g. "- Codex model: ...")
+// 5. Intelligent tiered defaults
+func ProviderModel(provider, role string, category ...string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	roleName := "dev-agent"
 	if role == TeamLeadRole {
 		roleName = "team-lead"
 	}
+
+	// 1. Check category model if provided
+	if len(category) > 0 && category[0] != "" {
+		cat := strings.ToLower(strings.TrimSpace(category[0]))
+		if model := settingOr(provider+" "+cat+" model", ""); model != "" {
+			return model
+		}
+		if model := settingOr(cat+" model", ""); model != "" {
+			return model
+		}
+	}
+
+	// 2. Role-specific provider setting
 	if model := settingOr(provider+" "+roleName+" model", ""); model != "" {
 		return model
 	}
+
+	// 3. Generic role setting
+	if model := settingOr(roleName+" model", ""); model != "" {
+		return model
+	}
+
+	// 4. Provider-wide model setting
 	if model := settingOr(provider+" model", ""); model != "" {
 		return model
 	}
+
 	if roleName == "team-lead" {
 		return ""
 	}
+
 	switch provider {
 	case "codex":
 		return DevAgentModel

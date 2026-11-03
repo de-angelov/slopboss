@@ -56,6 +56,10 @@ func RunLoopWithMode(parent context.Context, providerName, mode string, ui UI) e
 		logx.Event("no repo-agent-* workspaces found; run 'slopboss setup' first")
 	}
 
+	mu.Lock()
+	lastTeamLeadActivity = time.Now()
+	mu.Unlock()
+
 	// Stop the TUI when the process is signalled (SIGTERM, or SIGINT that isn't
 	// consumed by the terminal as Ctrl-C).
 	uiExited := make(chan struct{})

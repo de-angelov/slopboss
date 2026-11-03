@@ -810,3 +810,43 @@ func TestDurableLoopFailureModes(t *testing.T) {
 		})
 	}
 }
+
+func TestIdleAuditSkippedWhenBoardUnchanged(t *testing.T) {
+	withRetryTestState(t)
+	oldFinished, oldActivity, oldHash := finished, lastTeamLeadActivity, lastAuditedBoardHash
+	oldBacklog, oldTasks, oldArchive := config.BacklogFile, config.TasksFile, config.ArchiveFile
+	t.Cleanup(func() {
+		finished, lastTeamLeadActivity, lastAuditedBoardHash = oldFinished, oldActivity, oldHash
+		config.BacklogFile, config.TasksFile, config.ArchiveFile = oldBacklog, oldTasks, oldArchive
+	})
+	dir := t.TempDir()
+	config.BacklogFile = filepath.Join(dir, "BACKLOG.md")
+	config.TasksFile = filepath.Join(dir, "TASKS.md")
+	config.ArchiveFile = filepath.Join(dir, "ARCHIVE.md")
+	_ = os.WriteFile(config.BacklogFile, []byte("# BACKLOG\n"), 0644)
+	_ = os.WriteFile(config.TasksFile, []byte("# TASKS\n"), 0644)
+	_ = os.WriteFile(config.ArchiveFile, []byte("# ARCHIVE\n"), 0644)
+
+	finished = map[string]FinishedSession{}
+	lastTeamLeadActivity = time.Now().Add(-2 * time.Hour)
+	state := ControllerState{}
+
+	// When lastAuditedBoardHash matches current boardStateHash:
+	lastAuditedBoardHash = boardStateHash()
+	if lastAuditedBoardHash == "" {
+		t.Fatal("expected non-empty board hash")
+	}
+
+	action, ok := planTeamLeadAction(nil, map[string]bool{}, state, map[string]desiredSession{}, map[string]bool{})
+	if ok {
+		t.Fatalf("expected audit to be skipped when board is unchanged, got: %#v", action)
+	}
+
+	// But if board changes (e.g. human adds a task to backlog):
+	lastTeamLeadActivity = time.Now().Add(-2 * time.Hour)
+	_ = os.WriteFile(config.BacklogFile, []byte("# BACKLOG\n\n### New Task\n"), 0644)
+	action, ok = planTeamLeadAction(nil, map[string]bool{}, state, map[string]desiredSession{}, map[string]bool{})
+	if !ok || action.Task.Section != teamLeadIdleAuditSection {
+		t.Fatalf("expected audit to trigger after board change, got: %#v", action)
+	}
+}

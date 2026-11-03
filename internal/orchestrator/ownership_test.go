@@ -102,3 +102,78 @@ func TestPlannerKeepsRunningIdleAuditOnHealthyBoard(t *testing.T) {
 		t.Fatalf("running healthy-board audit displaced: %#v", plan)
 	}
 }
+
+func TestApproveTerminalRetryByTaskIDAndLiveQueue(t *testing.T) {
+	old := config.WorkspacesRoot
+	config.WorkspacesRoot = t.TempDir()
+	t.Cleanup(func() { config.WorkspacesRoot = old })
+
+	store := NewControllerStateStore(filepath.Join(config.WorkspacesRoot, "controller-state.json"))
+	now := time.Now()
+	lease := ControllerWorkerLease{
+		Intent:      ControllerTaskIntent{TaskID: "TASK-078", Role: "Dev Agent 2", Branch: "agent/2/task-078"},
+		LeaseID:     "lease-078",
+		HeartbeatAt: now,
+		Attempt:     config.MaxFailedSessionRetries + 1,
+		Terminal:    &ControllerTerminalResult{Outcome: string(sessionFailed), FinishedAt: now, Evidence: "quota exceeded"},
+	}
+	if err := store.Commit(ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Test offline retry approval using Task ID
+	if err := ApproveTerminalRetry("TASK-078", "lifted"); err != nil {
+		t.Fatalf("ApproveTerminalRetry by task ID failed: %v", err)
+	}
+
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.RetryApprovals["lease-078"] != "lifted" {
+		t.Fatalf("expected retry approval for lease-078, got: %v", state.RetryApprovals)
+	}
+
+	// 2. Test live retry approval when controller lock is held
+	unlock, err := lockController()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// While controller is locked, ApproveTerminalRetry should queue the request
+	if err := ApproveTerminalRetry("TASK-078", "second retry"); err != nil {
+		t.Fatalf("ApproveTerminalRetry while locked failed: %v", err)
+	}
+
+	// Simulate controller consuming pending requests in its reconcile tick
+	consumePendingRetryRequestsLocked(store, &state)
+
+	state, err = store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.RetryApprovals["lease-078"] != "second retry" {
+		t.Fatalf("expected updated live retry approval, got: %v", state.RetryApprovals)
+	}
+
+	unlock()
+}
+
+func TestIsQuotaOrRateLimit(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want bool
+	}{
+		{"429 Too Many Requests", true},
+		{"insufficient_quota: you have exceeded your current quota", true},
+		{"rate limit exceeded. Try again in 20s", true},
+		{"RESOURCE_EXHAUSTED: quota reached", true},
+		{"syntax error in main.go:42", false},
+		{"exit status 1: test failed", false},
+	}
+	for _, tc := range cases {
+		if got := isQuotaOrRateLimit(tc.msg); got != tc.want {
+			t.Errorf("isQuotaOrRateLimit(%q) = %v, want %v", tc.msg, got, tc.want)
+		}
+	}
+}

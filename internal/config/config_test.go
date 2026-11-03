@@ -93,6 +93,35 @@ func TestProviderModelReadsBoardRoleOverrideAndFallback(t *testing.T) {
 	}
 }
 
+func TestProviderModelTieredDefaultsAndCategoryOverride(t *testing.T) {
+	oldRoot := RepoRoot
+	RepoRoot = t.TempDir()
+	t.Cleanup(func() { RepoRoot = oldRoot })
+
+	if got := ProviderModel("codex", TeamLeadRole); got != "" {
+		t.Fatalf("codex team-lead default = %q, want empty", got)
+	}
+	if got := ProviderModel("codex", DevAgent1Role); got != DevAgentModel {
+		t.Fatalf("codex dev-agent default = %q, want %q", got, DevAgentModel)
+	}
+
+	content := `- Codex docs model: gpt-5-mini
+- Team-lead model: custom-lead
+`
+	if err := os.WriteFile(ConfigFilePath(), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ProviderModel("codex", DevAgent1Role, "DOCS"); got != "gpt-5-mini" {
+		t.Fatalf("codex dev model for DOCS = %q, want %q", got, "gpt-5-mini")
+	}
+	if got := ProviderModel("codex", DevAgent1Role, "COMPLEX"); got != DevAgentModel {
+		t.Fatalf("codex dev model for COMPLEX = %q, want %q", got, DevAgentModel)
+	}
+	if got := ProviderModel("claude", TeamLeadRole); got != "custom-lead" {
+		t.Fatalf("claude team-lead model = %q, want %q", got, "custom-lead")
+	}
+}
+
 func TestResolveRepoRootFromCurrentRoot(t *testing.T) {
 	root := makeRepoRoot(t)
 

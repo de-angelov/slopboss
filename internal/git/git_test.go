@@ -102,3 +102,27 @@ func runTestGitOutput(t *testing.T, workspace string, args ...string) string {
 	}
 	return string(output)
 }
+
+func TestLastCommitMessageAndCommitAll(t *testing.T) {
+	workspace := initGitWorkspace(t)
+	runTestGit(t, workspace, "checkout", "-b", "agent/1/test-task")
+
+	newFile := filepath.Join(workspace, "hello.txt")
+	if err := os.WriteFile(newFile, []byte("hello world\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	wantMsg := "TASK-999: add hello\n\nDetailed rationale for hello."
+	if err := CommitAll(workspace, wantMsg); err != nil {
+		t.Fatalf("CommitAll failed: %v", err)
+	}
+
+	gotMsg, err := LastCommitMessage(workspace, "agent/1/test-task")
+	if err != nil {
+		t.Fatalf("LastCommitMessage failed: %v", err)
+	}
+
+	if strings.TrimSpace(gotMsg) != wantMsg {
+		t.Fatalf("LastCommitMessage() = %q, want %q", gotMsg, wantMsg)
+	}
+}

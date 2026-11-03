@@ -96,14 +96,21 @@ func startSession(role string, task board.Task, taskKey string, tasks []board.Ta
 			outcome, evidence = runTeamLead(ctx, task, tasks)
 		default:
 			if idx, ok := config.DevAgentIndexForRole(role); ok {
-				outcome = runAgent(ctx, role, config.DevAgentWorkspace(idx), task, tasks)
+				workspace := config.DevAgentWorkspace(idx)
+				outcome = runAgent(ctx, role, workspace, task, tasks)
+				if outcome == sessionCompleted {
+					landOutcome, landEvidence := LandCompletedTask(ctx, task, role, workspace)
+					outcome = landOutcome
+					evidence = landEvidence
+				}
 			}
 		}
 	}()
 }
 
 func runAgent(ctx context.Context, role string, workspace string, task board.Task, tasks []board.Task) SessionOutcome {
-	logx.Event("starting %s on %s in %s", role, task.Title, workspace)
+	model := config.ProviderModel(sessionProvider.Name(), role, task.Category)
+	logx.Event("starting %s on %s in %s (model: %s)", role, task.Title, workspace, model)
 
 	if task.Branch != "" {
 		if err := git.PrepareBranch(workspace, task.Branch); err != nil {
@@ -114,7 +121,7 @@ func runAgent(ctx context.Context, role string, workspace string, task board.Tas
 
 	p := prompt.BuildPrompt(role, task, tasks, prompt.DevAgentRuntimeInstructions())
 
-	return runSession(ctx, role, workspace, p, sessionProvider)
+	return runSessionWithReportAndModel(ctx, role, workspace, p, sessionProvider, "", model)
 }
 
 func runTeamLead(ctx context.Context, task board.Task, tasks []board.Task) (SessionOutcome, string) {
@@ -123,6 +130,14 @@ func runTeamLead(ctx context.Context, task board.Task, tasks []board.Task) (Sess
 	currentBranch := git.CurrentBranchName(config.TeamLeadPath)
 	if currentBranch != "" {
 		logx.Event("team lead branch: %s", currentBranch)
+	}
+
+	model := config.ProviderModel(sessionProvider.Name(), teamLeadRole, task.Category)
+	logx.Event("starting %s on %s (model: %s)", teamLeadRole, task.Title, model)
+
+	maxTurns := config.TeamLeadMaxTurns
+	if task.Section == teamLeadIdleAuditSection {
+		maxTurns = config.IdleAuditMaxTurns
 	}
 
 	rules := fmt.Sprintf(`
@@ -141,10 +156,10 @@ Efficiency Rules (keep this session small — you are hard-capped at %d turns):
 - Do NOT slurp whole files (no full ARCHIVE.md read) and do NOT re-derive board state from git: no repo-wide 'grep -rn', no 'git log -N', no 'ls -R', no 'git fetch' or branch enumeration. Every command's output is re-sent on every later turn, so keep each output tiny and targeted.
 - Decide, then write. Apply your assignment/priority decisions in as few board edits as possible — batch edits to a file rather than many small rewrites.
 - If you cannot finish within the turn budget, apply the highest-priority board change first; the next grooming pass resumes from the updated board.
-`, config.TeamLeadMaxTurns)
+`, maxTurns)
 	if isAgentLeadTask(task) {
 		rules = fmt.Sprintf(`Role: Team Lead Agent
-Decide the next useful coordination actions from the supplied board and worker snapshot. Use slopboss board commands to make structural changes; do not edit shared board files directly. You may inspect and review relevant worker branches, and merge only after focused verification. Do not implement product code. Preserve uncertainty and report concrete evidence. If there is nothing useful to do, finish without changes. You are limited to %d turns.`, config.TeamLeadMaxTurns)
+Decide the next useful coordination actions from the supplied board and worker snapshot. Use slopboss board commands to make structural changes; do not edit shared board files directly. You may inspect and review relevant worker branches, and merge only after focused verification. Do not implement product code. Preserve uncertainty and report concrete evidence. If there is nothing useful to do, finish without changes. You are limited to %d turns.`, maxTurns)
 	}
 	executable, err := os.Executable()
 	if err == nil {
@@ -169,9 +184,14 @@ Decide the next useful coordination actions from the supplied board and worker s
 	p := prompt.BuildPrompt(teamLeadRole, task, tasks, rules)
 
 	before := boardStateHash()
-	outcome := runSessionWithReport(ctx, teamLeadRole, config.TeamLeadPath, p, sessionProvider, reportPath)
+	outcome := runSessionWithReportAndModel(ctx, teamLeadRole, config.TeamLeadPath, p, sessionProvider, reportPath, model)
 	if isAgentLeadTask(task) && outcome == sessionCompleted {
 		return classifyCoordinationReport(reportPath)
+	}
+	if outcome == sessionCompleted && task.Section == teamLeadIdleAuditSection {
+		mu.Lock()
+		lastAuditedBoardHash = boardStateHash()
+		mu.Unlock()
 	}
 	if outcome == sessionCompleted && task.Section != teamLeadIdleAuditSection && !isAgentLeadTask(task) && before != "" && boardStateHash() == before {
 		logx.Event("team lead completed without changing the board; retrying after cooldown")
@@ -208,11 +228,18 @@ func boardStateHash() string {
 }
 
 func runSession(ctx context.Context, role string, workspace string, promptText string, p provider.Provider) SessionOutcome {
-	return runSessionWithReport(ctx, role, workspace, promptText, p, "")
+	return runSessionWithReportAndModel(ctx, role, workspace, promptText, p, "", "")
 }
 
 func runSessionWithReport(ctx context.Context, role string, workspace string, promptText string, p provider.Provider, reportPath string) SessionOutcome {
-	model := p.DefaultModel(role)
+	return runSessionWithReportAndModel(ctx, role, workspace, promptText, p, reportPath, "")
+}
+
+func runSessionWithReportAndModel(ctx context.Context, role string, workspace string, promptText string, p provider.Provider, reportPath, modelOverride string) SessionOutcome {
+	model := modelOverride
+	if model == "" {
+		model = p.DefaultModel(role)
+	}
 
 	// Cap agentic turns to prevent runaway loops from burning tokens.
 	maxTurns := config.DevAgentMaxTurns
@@ -260,7 +287,15 @@ func runSessionWithReport(ctx context.Context, role string, workspace string, pr
 	}
 
 	if err != nil {
-		if monitor.UsageLimited() {
+		isUsage := monitor.UsageLimited()
+		if !isUsage {
+			if reporter, ok := monitor.(provider.ErrorReporter); ok && isQuotaOrRateLimit(reporter.ErrorMessage()) {
+				isUsage = true
+			} else if isQuotaOrRateLimit(err.Error()) {
+				isUsage = true
+			}
+		}
+		if isUsage {
 			pauseLaunchesAfterUsageLimit(time.Now())
 			logx.Event("%s usage limit reached in %s: %v", p.Name(), workspace, err)
 			return sessionUsageLimited
@@ -317,4 +352,16 @@ func logTokenBreakdown(role string, usage provider.TokenBreakdown) {
 		usage.Output,
 		usage.ReasoningOutput,
 	)
+}
+
+func isQuotaOrRateLimit(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "rate_limit") ||
+		strings.Contains(lower, "usage limit") ||
+		strings.Contains(lower, "insufficient_quota") ||
+		strings.Contains(lower, "quota") ||
+		strings.Contains(lower, "429") ||
+		strings.Contains(lower, "too many requests") ||
+		strings.Contains(lower, "resource_exhausted")
 }

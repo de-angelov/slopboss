@@ -82,11 +82,11 @@ func InspectWorkerLease(role string) (LeaseInspection, error) {
 	if err != nil {
 		return LeaseInspection{}, err
 	}
-	lease, found := findControllerLease(state, role)
+	lease, found := FindControllerLeaseByTarget(state, role)
 	if !found {
-		return LeaseInspection{}, fmt.Errorf("no lease for role %q", role)
+		return LeaseInspection{}, fmt.Errorf("no lease found for %q", role)
 	}
-	out := LeaseInspection{Role: role, TaskID: lease.Intent.TaskID, LeaseID: lease.LeaseID, HeartbeatAt: lease.HeartbeatAt.Format("2006-01-02T15:04:05Z07:00"), Outcome: "unresolved", Process: lease.Process, Observation: "unknown", Note: "This observation does not establish whether descendants or remote workers have stopped."}
+	out := LeaseInspection{Role: lease.Intent.Role, TaskID: lease.Intent.TaskID, LeaseID: lease.LeaseID, HeartbeatAt: lease.HeartbeatAt.Format("2006-01-02T15:04:05Z07:00"), Outcome: "unresolved", Process: lease.Process, Observation: "unknown", Note: "This observation does not establish whether descendants or remote workers have stopped."}
 	if lease.Terminal != nil {
 		out.Outcome = lease.Terminal.Outcome
 		out.Evidence = lease.Terminal.Evidence

@@ -9,6 +9,19 @@ import (
 
 const codexUsageLimitMarker = "You've hit your usage limit"
 
+func isCodexUsageLimited(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "usage limit") ||
+		strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "rate_limit") ||
+		strings.Contains(lower, "insufficient_quota") ||
+		strings.Contains(lower, "quota exceeded") ||
+		strings.Contains(lower, "exceeded your current quota") ||
+		strings.Contains(lower, "too many requests") ||
+		strings.Contains(lower, "resource_exhausted") ||
+		strings.Contains(lower, "429")
+}
+
 // TokenBreakdown is the per-session token accounting shared by every backend
 // monitor. Total is what the UI and cumulative counters use; the split fields
 // feed the orchestrator's breakdown log so a large total can be attributed to
@@ -58,11 +71,12 @@ func (w *codexOutputMonitor) Write(p []byte) (int, error) {
 
 func (w *codexOutputMonitor) detectUsageLimitLocked(text string) {
 	combined := w.tail + text
-	if strings.Contains(combined, codexUsageLimitMarker) {
+	if isCodexUsageLimited(combined) {
 		w.usageLimitDetected = true
 	}
-	if len(combined) > len(codexUsageLimitMarker) {
-		w.tail = combined[len(combined)-len(codexUsageLimitMarker):]
+	const maxTail = 256
+	if len(combined) > maxTail {
+		w.tail = combined[len(combined)-maxTail:]
 	} else {
 		w.tail = combined
 	}

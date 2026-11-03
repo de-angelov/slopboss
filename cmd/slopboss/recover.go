@@ -13,9 +13,9 @@ var recoverRetry bool
 var recoverInspect bool
 var recoverReason string
 var recoverCmd = &cobra.Command{
-	Use:         "recover ROLE",
-	Short:       "Resolve a worker lease after verifying the worker has stopped",
-	Long:        "Record a stopped worker for an unresolved lease. First verify the worker and all its children have stopped; then supply --confirm-stopped. The controller must not be running.",
+	Use:         "recover [ROLE or TASK-ID]",
+	Short:       "Resolve or retry a worker lease after failure, quota pause, or crash",
+	Long:        "Record a stopped worker or approve a retry for an unresolved, failed, or blocked lease. You can pass either a role (e.g. \"Dev Agent 1\") or a task ID (e.g. \"TASK-078\").",
 	Annotations: needsBoard,
 	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -33,7 +33,11 @@ var recoverCmd = &cobra.Command{
 			if recoverConfirmed {
 				return fmt.Errorf("--retry and --confirm-stopped cannot be combined")
 			}
-			return orchestrator.ApproveTerminalRetry(strings.TrimSpace(args[0]), recoverReason)
+			if err := orchestrator.ApproveTerminalRetry(strings.TrimSpace(args[0]), recoverReason); err != nil {
+				return err
+			}
+			fmt.Printf("Approved retry for %s\n", args[0])
+			return nil
 		}
 		if !recoverConfirmed {
 			return fmt.Errorf("verify the worker and its children have stopped, then pass --confirm-stopped")
