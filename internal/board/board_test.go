@@ -8,6 +8,25 @@ import (
 	"github.com/de-angelov/slopboss/internal/config"
 )
 
+func TestTaskSelectionUsesProvidedCompletionSnapshot(t *testing.T) {
+	backlog := []Task{{ID: "NEXT", Title: "Next", Section: "Backlog", Status: "Backlog", Category: "AFK", Dependencies: "DEP"}}
+	blocked := []Task{{ID: "WAITING", Title: "Waiting", Section: "Blocked Tasks", Status: "Blocked", Dependencies: "DEP"}}
+	for _, tc := range []struct {
+		done                     map[string]bool
+		wantBacklog, wantBlocked string
+	}{
+		{map[string]bool{}, "", ""},
+		{map[string]bool{"DEP": true}, "NEXT", "WAITING"},
+	} {
+		if got := FirstBacklogTask(backlog, tc.done).ID; got != tc.wantBacklog {
+			t.Errorf("backlog with %v: got %q, want %q", tc.done, got, tc.wantBacklog)
+		}
+		if got := UnblockedBlockedTask(blocked, tc.done).ID; got != tc.wantBlocked {
+			t.Errorf("blocked with %v: got %q, want %q", tc.done, got, tc.wantBlocked)
+		}
+	}
+}
+
 func TestTaskFingerprintIgnoresBodyProgressNotes(t *testing.T) {
 	base := Task{
 		Section: "Dev Agent 1 In Progress",
@@ -58,7 +77,7 @@ func TestFirstBacklogTaskPrefersAFKOverHITL(t *testing.T) {
 		{Section: "Backlog", Title: "Another AFK", Status: "Backlog", Category: "AFK"},
 	}
 
-	got := FirstBacklogTask(tasks)
+	got := FirstBacklogTask(tasks, CompletedSet())
 	if got.Title != "Autonomous Cleanup" {
 		t.Fatalf("FirstBacklogTask = %q, want %q (first AFK, skipping head-of-line HITL)", got.Title, "Autonomous Cleanup")
 	}
@@ -70,7 +89,7 @@ func TestFirstBacklogTaskLeavesHITLForHumanInput(t *testing.T) {
 		{Section: "Backlog", Title: "Another Human Task", Status: "Backlog", Category: "HITL"},
 	}
 
-	got := FirstBacklogTask(tasks)
+	got := FirstBacklogTask(tasks, CompletedSet())
 	if got.Title != "" {
 		t.Fatalf("FirstBacklogTask = %q, want no autonomous HITL assignment", got.Title)
 	}
@@ -82,7 +101,7 @@ func TestFirstBacklogTaskIgnoresActiveAndCompleted(t *testing.T) {
 		{Section: "Backlog", Title: "Pending HITL", Status: "Backlog", Category: "HITL"},
 	}
 
-	got := FirstBacklogTask(tasks)
+	got := FirstBacklogTask(tasks, CompletedSet())
 	if got.Title != "" {
 		t.Fatalf("FirstBacklogTask = %q, want no autonomous HITL assignment", got.Title)
 	}
@@ -104,7 +123,7 @@ func TestFirstBacklogTaskSkipsUnmetDependencies(t *testing.T) {
 		{Section: "Backlog", Title: "Ready Backend", ID: "BACK-01", Status: "Backlog", Category: "AFK", Dependencies: "DONE-DEP"},
 	}
 
-	got := FirstBacklogTask(tasks)
+	got := FirstBacklogTask(tasks, CompletedSet())
 	if got.ID != "BACK-01" {
 		t.Fatalf("FirstBacklogTask = %q, want BACK-01 (skip the AFK task with an unmet dependency)", got.ID)
 	}
@@ -123,7 +142,7 @@ func TestFirstBacklogTaskIdleWhenAllBlocked(t *testing.T) {
 		{Section: "Backlog", Title: "Blocked B", ID: "B", Status: "Backlog", Category: "HITL", Dependencies: "ALSO-NOPE"},
 	}
 
-	if got := FirstBacklogTask(tasks); got.Title != "" {
+	if got := FirstBacklogTask(tasks, CompletedSet()); got.Title != "" {
 		t.Fatalf("FirstBacklogTask = %q, want empty (nothing assignable -> team lead idle)", got.Title)
 	}
 }

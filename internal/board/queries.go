@@ -14,7 +14,7 @@ func FindDesiredTaskForRole(tasks []Task, role string) Task {
 		if HasBoardError(tasks) || !LanesHaveCapacity(tasks) {
 			return Task{}
 		}
-		return FirstBacklogTask(tasks)
+		return FirstBacklogTask(tasks, CompletedSet())
 	}
 	if _, ok := config.DevAgentIndexForRole(role); ok {
 		activeTasks := ActiveTasksForRole(tasks, role)
@@ -64,7 +64,7 @@ func LanesHaveCapacity(tasks []Task) bool {
 
 // HasBacklog reports whether any assignable backlog task exists.
 func HasBacklog(tasks []Task) bool {
-	return FirstBacklogTask(tasks).Title != ""
+	return FirstBacklogTask(tasks, CompletedSet()).Title != ""
 }
 
 // FirstBacklogTask returns the backlog task the team lead should be pointed at
@@ -76,9 +76,7 @@ func HasBacklog(tasks []Task) bool {
 // autonomously runnable) wins over HITL, and board order breaks further ties.
 // Returns the zero Task when nothing is assignable, which leaves the team lead
 // idle rather than spinning on blocked work.
-func FirstBacklogTask(tasks []Task) Task {
-	done := CompletedSet()
-
+func FirstBacklogTask(tasks []Task, done map[string]bool) Task {
 	var firstReady Task
 	found := false
 	for _, task := range tasks {
@@ -209,8 +207,7 @@ func DependenciesSatisfied(task Task, done map[string]bool) bool {
 // ready to be moved back into a free Dev Agent lane; surfacing it lets the
 // reconcile loop hand the Team Lead an explicit unblock pass instead of waiting
 // for a grooming slot. Returns the zero Task when none qualify.
-func UnblockedBlockedTask(tasks []Task) Task {
-	done := CompletedSet()
+func UnblockedBlockedTask(tasks []Task, done map[string]bool) Task {
 	for _, task := range tasks {
 		if task.Section != "Blocked Tasks" {
 			continue

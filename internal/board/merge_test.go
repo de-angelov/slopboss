@@ -87,7 +87,7 @@ func TestFirstBacklogTaskUnblockedByMergedDependency(t *testing.T) {
 		{Section: "Backlog", Title: "Board Wireframe", ID: "BOARD-WF-01", Status: "Backlog", Category: "AFK", Dependencies: "BOARD-03B"},
 	}
 
-	if got := FirstBacklogTask(tasks); got.ID != "BOARD-WF-01" {
+	if got := FirstBacklogTask(tasks, CompletedSet()); got.ID != "BOARD-WF-01" {
 		t.Fatalf("FirstBacklogTask = %q, want BOARD-WF-01 (dependency merged to main should unblock it)", got.ID)
 	}
 }

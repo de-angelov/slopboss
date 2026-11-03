@@ -220,7 +220,7 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 	// Prefer unblocking a ready blocked task over grooming new work: unblocking
 	// unlocks downstream work and recovers stalled lanes. Only fall back to the
 	// backlog when nothing is ready to unblock.
-	if ub := board.UnblockedBlockedTask(tasks); ub.Title != "" {
+	if ub := board.UnblockedBlockedTask(tasks, done); ub.Title != "" {
 		ut := board.Task{
 			Section: teamLeadUnblockSection,
 			Title:   "Unblock: " + ub.Title,
@@ -229,7 +229,7 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 			Key:     "unblock\x00" + ub.Key,
 		}
 		backlogTask = &ut
-	} else if bt := board.FirstBacklogTask(tasks); bt.Title != "" {
+	} else if bt := board.FirstBacklogTask(tasks, done); bt.Title != "" {
 		backlogTask = &bt
 	}
 
