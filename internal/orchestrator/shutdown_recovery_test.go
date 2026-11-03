@@ -148,3 +148,35 @@ func TestReconcileCommitsMultipleNewLeases(t *testing.T) {
 		t.Fatalf("persisted leases = %#v", saved.Leases)
 	}
 }
+
+func TestRunningSessionPersistsProcessIdentity(t *testing.T) {
+	withRetryTestState(t)
+	oldStore, oldProvider, oldRoot := controllerStateStore, sessionProvider, config.WorkspacesRoot
+	config.WorkspacesRoot = t.TempDir()
+	controllerStateStore = NewControllerStateStore(filepath.Join(config.WorkspacesRoot, "controller-state.json"))
+	sessionProvider = shutdownProvider{}
+	t.Cleanup(func() { controllerStateStore, sessionProvider, config.WorkspacesRoot = oldStore, oldProvider, oldRoot })
+	if err := os.MkdirAll(config.DevAgentWorkspace(1), 0755); err != nil {
+		t.Fatal(err)
+	}
+	task := board.Task{ID: "task", Title: "test", Key: "key"}
+	now := time.Now()
+	lease := ControllerWorkerLease{Intent: ControllerTaskIntent{TaskID: task.ID, Role: devAgent1Role, Branch: "branch"}, LeaseID: "lease", HeartbeatAt: now, Attempt: 1}
+	if err := commitControllerState(ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	running = map[string]RunningSession{}
+	mu.Unlock()
+	startSession(devAgent1Role, task, task.Key, nil, lease.LeaseID)
+	defer shutdownSessions()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		state, err := loadControllerState()
+		if err == nil && state.Leases[0].Process != nil && state.Leases[0].Process.PID > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("running worker process was not recorded")
+}

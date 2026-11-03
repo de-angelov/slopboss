@@ -80,6 +80,7 @@ type SessionOutcome string
 const (
 	sessionCompleted    SessionOutcome = "completed"
 	sessionFailed       SessionOutcome = "failed"
+	sessionBlocked      SessionOutcome = "blocked"
 	sessionCancelled    SessionOutcome = "cancelled"
 	sessionUsageLimited SessionOutcome = "usage-limited"
 	sessionUnknown      SessionOutcome = "unknown"

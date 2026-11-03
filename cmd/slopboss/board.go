@@ -37,6 +37,19 @@ var boardGetCmd = &cobra.Command{
 	},
 }
 
+var boardClearHumanCmd = &cobra.Command{
+	Use:   "clear-human TASK-ID",
+	Short: "Clear a human-input entry whose task is archived Done",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		removed, err := board.ClearCompletedHumanInput(args[0])
+		if err != nil {
+			return err
+		}
+		return writeJSON(map[string]bool{"removed": removed})
+	},
+}
+
 var continuationReason string
 var boardResumeCmd = &cobra.Command{
 	Use:   "resume TASK-ID",
@@ -170,6 +183,6 @@ func init() {
 	boardCreateCmd.Flags().StringVar(&createDependencies, "dependencies", "none", "dependency task IDs")
 	boardCreateCmd.Flags().StringVar(&createBody, "body", "", "task body with Objective, Scope, Out of Scope, Acceptance Criteria, Verification")
 	boardResumeCmd.Flags().StringVar(&continuationReason, "reason", "", "specific instructions for the continuation")
-	boardCmd.AddCommand(boardGetCmd, boardSetCmd, boardCreateCmd, boardAssignCmd, boardResumeCmd, boardNormalizeTasksCmd)
+	boardCmd.AddCommand(boardGetCmd, boardSetCmd, boardCreateCmd, boardAssignCmd, boardResumeCmd, boardClearHumanCmd, boardNormalizeTasksCmd)
 	rootCmd.AddCommand(boardCmd)
 }

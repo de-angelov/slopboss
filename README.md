@@ -128,6 +128,16 @@ that recorded request once and does not restart a worker without terminal eviden
 Running the command after a later session has finished requests another session.
 Agent mode is experimental: worker outcome evidence currently records the process
 result, and agent decisions are not a substitute for checking merge and test evidence.
+The Team Lead records a structured `acted`, `idle`, or `blocked` result with a
+summary. A missing or blocked result requires review and is not silently treated
+as success. After investigating, stop the controller and approve one retry with
+`slopboss --dir <board> recover "Team Lead Agent" --retry --reason "what changed"`.
+The prior outcome and the reason for retry remain in controller state.
+For process evidence before recovery, run
+`slopboss --dir <board> recover "Dev Agent 1" --inspect`. New leases record the
+provider process identity when available. A missing or changed PID is not proof
+that its children or a remote worker have stopped; recovery still requires
+independent verification.
 
 > **WHERE TO RUN IT:** slopboss resolves which board to use in this order —
 > `--dir <board>` if given, else the current directory if it's a board, else the

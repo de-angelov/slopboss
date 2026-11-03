@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -74,4 +75,41 @@ func TerminalWorkerLease(role, taskID, branch string) (ControllerWorkerLease, er
 		return ControllerWorkerLease{}, fmt.Errorf("worker %s has no terminal evidence; verify it stopped and recover its lease first", role)
 	}
 	return lease, nil
+}
+
+// ApproveTerminalRetry records a one-use operator override without erasing the
+// original terminal evidence. The controller must be stopped.
+func ApproveTerminalRetry(role, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || len(reason) > 2000 {
+		return fmt.Errorf("retry requires a reason of 1 to 2000 characters")
+	}
+	unlock, err := lockController()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	store := NewControllerStateStore(filepath.Join(config.WorkspacesRoot, "controller-state.json"))
+	state, err := store.Load()
+	if err != nil {
+		return err
+	}
+	lease, found := findControllerLease(state, role)
+	if !found {
+		return fmt.Errorf("no lease for role %q", role)
+	}
+	if lease.Terminal == nil {
+		return fmt.Errorf("role %q has no terminal result; resolve the worker lease first", role)
+	}
+	if lease.Terminal.Outcome != string(sessionBlocked) && lease.Terminal.Outcome != string(sessionFailed) && lease.Terminal.Outcome != string(sessionUnknown) {
+		return fmt.Errorf("role %q has no blocked or failed result to retry", role)
+	}
+	if state.RetryApprovals == nil {
+		state.RetryApprovals = make(map[string]string)
+	}
+	if state.RetryApprovals[lease.LeaseID] != reason {
+		state.RetryHistory = append(state.RetryHistory, ControllerRetryApproval{LeaseID: lease.LeaseID, Reason: reason, ApprovedAt: time.Now()})
+	}
+	state.RetryApprovals[lease.LeaseID] = reason
+	return store.Commit(state)
 }

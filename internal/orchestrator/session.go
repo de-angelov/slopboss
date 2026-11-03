@@ -11,6 +11,7 @@ import (
 
 	"github.com/de-angelov/slopboss/internal/board"
 	"github.com/de-angelov/slopboss/internal/config"
+	"github.com/de-angelov/slopboss/internal/coordination"
 	"github.com/de-angelov/slopboss/internal/git"
 	"github.com/de-angelov/slopboss/internal/logx"
 	"github.com/de-angelov/slopboss/internal/prompt"
@@ -57,6 +58,7 @@ func shutdownSessions() {
 
 func startSession(role string, task board.Task, taskKey string, tasks []board.Task, leaseID string) {
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = context.WithValue(ctx, processLeaseKey{}, leaseID)
 
 	mu.Lock()
 	running[role] = RunningSession{
@@ -73,9 +75,10 @@ func startSession(role string, task board.Task, taskKey string, tasks []board.Ta
 
 	go func() {
 		outcome := sessionUnknown
+		var evidence string
 		defer func() {
 			if outcome != sessionUnknown {
-				if err := reportSessionTerminal(leaseID, outcome, role, taskKey); err != nil {
+				if err := reportSessionTerminal(leaseID, outcome, role, taskKey, evidence); err != nil {
 					logx.Event("cannot report %s terminal result: %v", role, err)
 				}
 			}
@@ -90,7 +93,7 @@ func startSession(role string, task board.Task, taskKey string, tasks []board.Ta
 
 		switch {
 		case role == teamLeadRole:
-			outcome = runTeamLead(ctx, task, tasks)
+			outcome, evidence = runTeamLead(ctx, task, tasks)
 		default:
 			if idx, ok := config.DevAgentIndexForRole(role); ok {
 				outcome = runAgent(ctx, role, config.DevAgentWorkspace(idx), task, tasks)
@@ -114,7 +117,7 @@ func runAgent(ctx context.Context, role string, workspace string, task board.Tas
 	return runSession(ctx, role, workspace, p, sessionProvider)
 }
 
-func runTeamLead(ctx context.Context, task board.Task, tasks []board.Task) SessionOutcome {
+func runTeamLead(ctx context.Context, task board.Task, tasks []board.Task) (SessionOutcome, string) {
 	git.RunGit(config.TeamLeadPath, "fetch", "--all", "--prune")
 
 	currentBranch := git.CurrentBranchName(config.TeamLeadPath)
@@ -143,15 +146,50 @@ Efficiency Rules (keep this session small — you are hard-capped at %d turns):
 		rules = fmt.Sprintf(`Role: Team Lead Agent
 Decide the next useful coordination actions from the supplied board and worker snapshot. Use slopboss board commands to make structural changes; do not edit shared board files directly. You may inspect and review relevant worker branches, and merge only after focused verification. Do not implement product code. Preserve uncertainty and report concrete evidence. If there is nothing useful to do, finish without changes. You are limited to %d turns.`, config.TeamLeadMaxTurns)
 	}
+	executable, err := os.Executable()
+	if err == nil {
+		rules += "\nUse this exact command prefix for board operations: " + shellQuote(executable) + " --dir " + shellQuote(config.RepoRoot) + ". Never use a different slopboss from PATH. To clear a completed task from Awaiting Human Input, use this prefix with board clear-human TASK-ID.\n"
+	}
+	var reportPath string
+	if isAgentLeadTask(task) {
+		if err := os.MkdirAll(config.WorkspacesRoot, 0755); err != nil {
+			return sessionBlocked, "cannot create coordination report directory: " + err.Error()
+		}
+		f, err := os.CreateTemp(config.WorkspacesRoot, ".coordination-report-*")
+		if err != nil {
+			return sessionBlocked, "cannot create coordination report: " + err.Error()
+		}
+		reportPath = f.Name()
+		if err := f.Close(); err != nil {
+			return sessionBlocked, "cannot close coordination report: " + err.Error()
+		}
+		defer os.Remove(reportPath)
+		rules += "\nBefore finishing, call the exact executable with coordination report --status STATUS --summary SUMMARY, choosing exactly one STATUS: acted, idle, or blocked. Use blocked if an intended action failed or remains uncertain; use idle only when no action is needed. A missing report requires human review.\n"
+	}
 	p := prompt.BuildPrompt(teamLeadRole, task, tasks, rules)
 
 	before := boardStateHash()
-	outcome := runSession(ctx, teamLeadRole, config.TeamLeadPath, p, sessionProvider)
+	outcome := runSessionWithReport(ctx, teamLeadRole, config.TeamLeadPath, p, sessionProvider, reportPath)
+	if isAgentLeadTask(task) && outcome == sessionCompleted {
+		return classifyCoordinationReport(reportPath)
+	}
 	if outcome == sessionCompleted && task.Section != teamLeadIdleAuditSection && !isAgentLeadTask(task) && before != "" && boardStateHash() == before {
 		logx.Event("team lead completed without changing the board; retrying after cooldown")
-		return sessionFailed
+		return sessionFailed, ""
 	}
-	return outcome
+	return outcome, ""
+}
+
+func classifyCoordinationReport(path string) (SessionOutcome, string) {
+	report, err := coordination.ReadReport(path)
+	if err != nil {
+		return sessionBlocked, "coordination result missing or invalid: " + err.Error()
+	}
+	evidence := "coordination " + report.Status + ": " + strings.TrimSpace(report.Summary)
+	if report.Status == "blocked" {
+		return sessionBlocked, evidence
+	}
+	return sessionCompleted, evidence
 }
 
 // boardStateHash fingerprints the three board files so a Team Lead session that
@@ -170,6 +208,10 @@ func boardStateHash() string {
 }
 
 func runSession(ctx context.Context, role string, workspace string, promptText string, p provider.Provider) SessionOutcome {
+	return runSessionWithReport(ctx, role, workspace, promptText, p, "")
+}
+
+func runSessionWithReport(ctx context.Context, role string, workspace string, promptText string, p provider.Provider, reportPath string) SessionOutcome {
 	model := p.DefaultModel(role)
 
 	// Cap agentic turns to prevent runaway loops from burning tokens.
@@ -184,6 +226,9 @@ func runSession(ctx context.Context, role string, workspace string, promptText s
 	if role != teamLeadRole {
 		cmd.Env = packageManagerTimeoutEnv(os.Environ())
 	}
+	if reportPath != "" {
+		cmd.Env = append(os.Environ(), coordination.ReportPathEnv+"="+reportPath)
+	}
 
 	// The monitor only parses; tee the raw stream to the orchestrator log too.
 	monitor := p.NewMonitor()
@@ -197,7 +242,15 @@ func runSession(ctx context.Context, role string, workspace string, promptText s
 	}
 	logx.Event("running %s session in %s with model %s", p.Name(), workspace, modelLabel)
 
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		if leaseID, ok := ctx.Value(processLeaseKey{}).(string); ok && leaseID != "" {
+			if recordErr := recordWorkerProcess(leaseID, cmd.Process.Pid); recordErr != nil {
+				logx.Event("cannot record %s process identity: %v", role, recordErr)
+			}
+		}
+		err = cmd.Wait()
+	}
 	usage := provider.FinalUsage(ctx, p, monitor)
 	logTokenBreakdown(role, usage)
 

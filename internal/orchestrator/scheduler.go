@@ -29,7 +29,7 @@ func commitControllerState(state ControllerState) error { return controllerState
 
 // reportSessionTerminal accepts worker execution evidence as a controller
 // event. Only this controller-side handler changes the durable lease snapshot.
-func reportSessionTerminal(leaseID string, outcome SessionOutcome, role, taskKey string) error {
+func reportSessionTerminal(leaseID string, outcome SessionOutcome, role, taskKey string, details ...string) error {
 	controllerMu.Lock()
 	defer controllerMu.Unlock()
 	state, err := loadControllerState()
@@ -41,6 +41,9 @@ func reportSessionTerminal(leaseID string, outcome SessionOutcome, role, taskKey
 			continue
 		}
 		evidence := terminalEvidence(outcome, role, taskKey)
+		if len(details) > 0 && details[0] != "" {
+			evidence += "; " + details[0]
+		}
 		if prior := state.Leases[i].Terminal; prior != nil {
 			if prior.Outcome == string(outcome) && prior.Evidence == evidence {
 				return nil
@@ -65,8 +68,13 @@ func commitRecoveryLease(state ControllerState, lease ControllerWorkerLease, tas
 			state.History = make(map[string]ControllerWorkerLease)
 		}
 		state.History[previous.LeaseID] = previous
+		if previous.LeaseID == lease.LeaseID {
+			state.PastResults = append(state.PastResults, previous)
+		}
+		delete(state.RetryApprovals, previous.LeaseID)
 	}
 	state.Leases = replaceControllerLease(state.Leases, lease)
+	delete(state.RetryApprovals, lease.LeaseID)
 	if err := commitControllerState(state); err != nil {
 		return err
 	}
@@ -118,12 +126,18 @@ func recoveryLeaseDecision(state ControllerState, role, leaseID string) (Control
 	if lease.Terminal == nil && time.Since(lease.HeartbeatAt) >= 10*time.Minute {
 		return lease, false, "Blocked: worker lease has no terminal evidence; verify worker stopped and use slopboss recover"
 	}
+	if lease.Terminal != nil && lease.Terminal.Outcome == string(sessionBlocked) && state.RetryApprovals[lease.LeaseID] == "" {
+		return lease, false, "Blocked: coordination requires review (" + lease.Terminal.Evidence + ")"
+	}
 	if lease.LeaseID != leaseID && lease.Terminal != nil {
 		if previous, ok := state.History[leaseID]; ok {
 			lease = previous
 		}
 	}
 	if lease.LeaseID == leaseID && lease.Terminal != nil {
+		if state.RetryApprovals[leaseID] != "" {
+			return lease, true, ""
+		}
 		completedPass := retryableCompletedTeamLeadPass(role, lease.Intent.TaskID, lease.Terminal.Outcome)
 		if retryableDurableResult(lease) || completedPass {
 			if lease.Attempt > config.MaxFailedSessionRetries && lease.Terminal.Outcome != string(sessionCancelled) && lease.Terminal.Outcome != string(sessionUsageLimited) {

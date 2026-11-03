@@ -15,9 +15,19 @@ const ControllerStateVersion = 1
 // orchestrator controller. Intent is copied from the board; runtime fields are
 // observations owned by the controller.
 type ControllerState struct {
-	Version int                              `json:"version"`
-	Leases  []ControllerWorkerLease          `json:"leases"`
-	History map[string]ControllerWorkerLease `json:"history,omitempty"`
+	Version        int                              `json:"version"`
+	Leases         []ControllerWorkerLease          `json:"leases"`
+	History        map[string]ControllerWorkerLease `json:"history,omitempty"`
+	RetryApprovals map[string]string                `json:"retry_approvals,omitempty"`
+	PastResults    []ControllerWorkerLease          `json:"past_results,omitempty"`
+	RetryHistory   []ControllerRetryApproval        `json:"retry_history,omitempty"`
+}
+
+// ControllerRetryApproval preserves operator rationale after an override is consumed.
+type ControllerRetryApproval struct {
+	LeaseID    string    `json:"lease_id"`
+	Reason     string    `json:"reason"`
+	ApprovedAt time.Time `json:"approved_at"`
 }
 
 // ControllerTaskIntent is the immutable board identity for one assignment.
@@ -36,11 +46,21 @@ type ControllerTerminalResult struct {
 
 // ControllerWorkerLease combines immutable board intent with controller-owned
 // runtime observations. Each role may have at most one lease.
+// ControllerProcess identifies the provider process at launch. It does not
+// prove that descendants or remote workers have stopped.
+type ControllerProcess struct {
+	PID          int    `json:"pid"`
+	ProcessGroup int    `json:"process_group,omitempty"`
+	BootID       string `json:"boot_id,omitempty"`
+	StartTicks   string `json:"start_ticks,omitempty"`
+}
+
 type ControllerWorkerLease struct {
 	Intent      ControllerTaskIntent      `json:"intent"`
 	LeaseID     string                    `json:"lease_id"`
 	HeartbeatAt time.Time                 `json:"heartbeat_at"`
 	Attempt     int                       `json:"attempt"`
+	Process     *ControllerProcess        `json:"process,omitempty"`
 	Terminal    *ControllerTerminalResult `json:"terminal,omitempty"`
 }
 
@@ -165,6 +185,9 @@ func ValidateControllerTransition(previous, candidate ControllerState) error {
 		if old.Attempt != next.Attempt {
 			return fmt.Errorf("controller transition for role %q must advance exactly one attempt", old.Intent.Role)
 		}
+		if old.Process != nil && (next.Process == nil || *old.Process != *next.Process) {
+			return fmt.Errorf("controller transition mutates process identity for role %q", old.Intent.Role)
+		}
 		if next.HeartbeatAt.Before(old.HeartbeatAt) {
 			return fmt.Errorf("controller transition regresses heartbeat for role %q", old.Intent.Role)
 		}
@@ -193,6 +216,9 @@ func ValidateControllerState(state ControllerState) error {
 		}
 		if !validTimestamp(lease.HeartbeatAt) {
 			return fmt.Errorf("lease %d: invalid heartbeat timestamp", i)
+		}
+		if lease.Process != nil && lease.Process.PID < 1 {
+			return fmt.Errorf("lease %d: invalid process ID", i)
 		}
 		if lease.Attempt < 1 {
 			return fmt.Errorf("lease %d: attempt must be positive", i)
