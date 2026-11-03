@@ -11,6 +11,33 @@ import (
 	"github.com/de-angelov/slopboss/internal/config"
 )
 
+func TestTeamLeadPlannerPrioritizesFollowUpAndFallsBackToAudit(t *testing.T) {
+	withRetryTestState(t)
+	oldFinished, oldActivity := finished, lastTeamLeadActivity
+	t.Cleanup(func() { finished, lastTeamLeadActivity = oldFinished, oldActivity })
+	finished = map[string]FinishedSession{devAgent1Role: {Role: devAgent1Role, Task: "Finished work", TaskKey: "work", Outcome: sessionCompleted}}
+	lastTeamLeadActivity = time.Time{}
+	blocked := []board.Task{{ID: "BLOCKED-1", Title: "Blocked", Section: "Backlog", Status: "Backlog", Dependencies: "MISSING"}}
+	plan := func() (desiredSession, bool) {
+		return planTeamLeadAction(blocked, map[string]bool{}, ControllerState{}, map[string]desiredSession{}, map[string]bool{})
+	}
+	action, ok := plan()
+	if !ok || action.Task.Section != teamLeadFollowUpSection {
+		t.Fatalf("expected completion follow-up first, got %#v", action)
+	}
+	finished = map[string]FinishedSession{}
+	action, ok = plan()
+	if !ok || action.Task.Section != teamLeadDecomposeSection {
+		t.Fatalf("expected decomposition, got %#v", action)
+	}
+	finished[teamLeadRole] = FinishedSession{Role: teamLeadRole, TaskKey: action.TaskKey}
+	failedSessionRetryCounts[failedSessionRetryKey(teamLeadRole, action.TaskKey)] = config.MaxFailedSessionRetries
+	action, ok = plan()
+	if !ok || action.Task.Section != teamLeadIdleAuditSection {
+		t.Fatalf("expected audit after exhausted decomposition, got %#v", action)
+	}
+}
+
 func TestCanRetryFailedSessionAfterDelayWithoutSideEffects(t *testing.T) {
 	withRetryTestState(t)
 	now := time.Now()

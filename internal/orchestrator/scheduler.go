@@ -214,7 +214,7 @@ type desiredSession struct {
 }
 
 // planTeamLeadAction selects the next Team Lead assignment in priority order.
-func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable ControllerState, desired map[string]desiredSession, invalidRoles map[string]bool) {
+func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable ControllerState, desired map[string]desiredSession, invalidRoles map[string]bool) (desiredSession, bool) {
 	var backlogTask *board.Task
 
 	// Prefer unblocking a ready blocked task over grooming new work: unblocking
@@ -247,22 +247,18 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 
 	followUpTask, needsFollowUp := completionFollowUpTask()
 
-	if backlogTask != nil && !needsFollowUp && len(invalidRoles) == 0 && allDevAgentsBusyDesired(desired) {
-		backlogTask = nil
-	}
-
-	if backlogTask != nil && len(invalidRoles) > 0 {
-		backlogTask = nil
-	}
-
 	if needsFollowUp {
-		desired[teamLeadRole] = desiredSession{Task: followUpTask, TaskKey: followUpTask.Key}
-	} else if backlogTask != nil {
-		desired[teamLeadRole] = desiredSession{
+		return desiredSession{Task: followUpTask, TaskKey: followUpTask.Key}, true
+	}
+	if backlogTask != nil && len(invalidRoles) == 0 && !allDevAgentsBusyDesired(desired) {
+		return desiredSession{
 			Task:    *backlogTask,
 			TaskKey: teamLeadScheduleKey(*backlogTask, tasks, done),
-		}
-	} else if _, taken := desired[teamLeadRole]; !taken && len(invalidRoles) == 0 {
+		}, true
+	}
+
+	var candidate desiredSession
+	if len(invalidRoles) == 0 {
 		// No dependency-ready work. Rather than idle, launch a throttled
 		// decomposition grooming pass if pending work is blocked — the team lead
 		// splits the human-required slice out and converts the rest to AFK, which
@@ -270,39 +266,29 @@ func planTeamLeadAction(tasks []board.Task, done map[string]bool, durable Contro
 		// runs once per distinct set of blockers instead of every poll.
 		if blocked := board.BlockedBacklogIDs(tasks, done); len(blocked) > 0 {
 			task := decompositionTask(blocked)
-			desired[teamLeadRole] = desiredSession{Task: task, TaskKey: task.Key}
+			candidate = desiredSession{Task: task, TaskKey: task.Key}
 		}
 	}
 
 	// If all useful Team Lead work is exhausted, run a small periodic board
 	// health pass. Its time-bucketed key prevents the loop from launching it on
 	// every poll; session start time provides the 30-minute quiet interval.
-	if wanted, assigned := desired[teamLeadRole]; assigned && !needsFollowUp && backlogTask == nil &&
-		(wanted.Task.Section == teamLeadDecomposeSection || wanted.Task.Section == teamLeadUnblockSection) {
-		mu.Lock()
-		doneForNow := false
-		if session, ok := finished[teamLeadRole]; ok && session.TaskKey == wanted.TaskKey {
-			doneForNow = failedSessionRetryCounts[failedSessionRetryKey(teamLeadRole, wanted.TaskKey)] >= config.MaxFailedSessionRetries
-			if doneForNow {
-				logx.Event("%s retries exhausted for %v; escalating to idle audit", wanted.Task.Section, wanted.TaskKey)
-			}
-		}
-		auditDue := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= teamLeadIdleAuditInterval
-		mu.Unlock()
-		if doneForNow && auditDue {
-			delete(desired, teamLeadRole)
-		}
+	mu.Lock()
+	due := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= teamLeadIdleAuditInterval
+	session, finishedCandidate := finished[teamLeadRole]
+	exhausted := finishedCandidate && session.TaskKey == candidate.TaskKey && failedSessionRetryCounts[failedSessionRetryKey(teamLeadRole, candidate.TaskKey)] >= config.MaxFailedSessionRetries
+	mu.Unlock()
+	if candidate.TaskKey != "" && !(exhausted && due) {
+		return candidate, true
 	}
-	if _, assigned := desired[teamLeadRole]; !assigned && !needsFollowUp && backlogTask == nil {
-		mu.Lock()
-		due := lastTeamLeadActivity.IsZero() || time.Since(lastTeamLeadActivity) >= teamLeadIdleAuditInterval
-		mu.Unlock()
-		if due {
-			audit := idleAuditTask(time.Now())
-			desired[teamLeadRole] = desiredSession{Task: audit, TaskKey: audit.Key}
-		}
+	if exhausted && due {
+		logx.Event("%s retries exhausted for %v; escalating to idle audit", candidate.Task.Section, candidate.TaskKey)
 	}
-
+	if due {
+		audit := idleAuditTask(time.Now())
+		return desiredSession{Task: audit, TaskKey: audit.Key}, true
+	}
+	return desiredSession{}, false
 }
 
 func reconcile(tasks []board.Task) {
@@ -339,7 +325,9 @@ func reconcile(tasks []board.Task) {
 		}
 	}
 
-	planTeamLeadAction(tasks, done, durable, desired, invalidRoles)
+	if action, ok := planTeamLeadAction(tasks, done, durable, desired, invalidRoles); ok {
+		desired[teamLeadRole] = action
+	}
 
 	now := time.Now()
 
