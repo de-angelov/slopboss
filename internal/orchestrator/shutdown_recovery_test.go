@@ -150,6 +150,9 @@ func TestReconcileCommitsMultipleNewLeases(t *testing.T) {
 }
 
 func TestRunningSessionPersistsProcessIdentity(t *testing.T) {
+	if _, err := os.Stat("/proc/sys/kernel/random/boot_id"); err != nil {
+		t.Skip("process identity requires procfs")
+	}
 	withRetryTestState(t)
 	oldStore, oldProvider, oldRoot := controllerStateStore, sessionProvider, config.WorkspacesRoot
 	config.WorkspacesRoot = t.TempDir()
@@ -174,6 +177,21 @@ func TestRunningSessionPersistsProcessIdentity(t *testing.T) {
 	for time.Now().Before(deadline) {
 		state, err := loadControllerState()
 		if err == nil && state.Leases[0].Process != nil && state.Leases[0].Process.PID > 0 {
+			inspection, err := InspectWorkerLease(devAgent1Role)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inspection.Observation != "process-present" {
+				t.Fatalf("running process observation: %#v", inspection)
+			}
+			shutdownSessions()
+			inspection, err = InspectWorkerLease(devAgent1Role)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inspection.Observation != "not-observed" || inspection.Outcome != "cancelled" {
+				t.Fatalf("stopped process observation: %#v", inspection)
+			}
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
