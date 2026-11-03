@@ -94,7 +94,7 @@ func Check(opts Options) []Finding {
 		} else if o.Provider == "opencode" {
 			args = []string{"auth", "list"}
 		} else if o.Provider == "agy" || o.Provider == "antigravity" {
-			args = []string{"auth", "status"}
+			args = []string{"models"}
 		}
 		if err := o.Run(o.Provider, args...); err != nil {
 			add("FAIL", o.Provider, "authentication probe failed; run `"+o.Provider+" login` and complete sign-in")
