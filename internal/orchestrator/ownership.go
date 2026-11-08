@@ -39,24 +39,36 @@ func FindControllerLeaseByTarget(state ControllerState, target string) (Controll
 
 func queueLiveRetryApproval(leaseID, reason string) error {
 	path := filepath.Join(config.WorkspacesRoot, retryRequestsFile)
-	var requests []liveRetryRequest
-	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &requests)
+	if err := os.MkdirAll(config.WorkspacesRoot, 0755); err != nil {
+		return err
 	}
-	requests = append(requests, liveRetryRequest{
-		LeaseID:    leaseID,
-		Reason:     reason,
-		ApprovedAt: time.Now(),
-	})
-	data, err := json.MarshalIndent(requests, "", "  ")
+	queueLock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	defer queueLock.Close()
+	if err := syscall.Flock(int(queueLock.Fd()), syscall.LOCK_EX); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	defer syscall.Flock(int(queueLock.Fd()), syscall.LOCK_UN)
+	request := liveRetryRequest{
+		LeaseID:    leaseID,
+		Reason:     reason,
+		ApprovedAt: time.Now(),
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func consumePendingRetryRequestsLocked(store *ControllerStateStore, durable *ControllerState) {
@@ -65,9 +77,33 @@ func consumePendingRetryRequestsLocked(store *ControllerStateStore, durable *Con
 	if err != nil {
 		return
 	}
+	queueLock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return
+	}
+	defer queueLock.Close()
+	if syscall.Flock(int(queueLock.Fd()), syscall.LOCK_EX) != nil {
+		return
+	}
+	defer syscall.Flock(int(queueLock.Fd()), syscall.LOCK_UN)
+	// Re-read after acquiring the queue lock so approvals appended since the
+	// initial existence check are included in this drain.
+	data, err = os.ReadFile(path)
+	if err != nil {
+		return
+	}
 	var requests []liveRetryRequest
-	if err := json.Unmarshal(data, &requests); err != nil || len(requests) == 0 {
-		_ = os.Remove(path)
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var request liveRetryRequest
+		if json.Unmarshal([]byte(line), &request) != nil {
+			return
+		}
+		requests = append(requests, request)
+	}
+	if len(requests) == 0 {
 		return
 	}
 	if durable.RetryApprovals == nil {
@@ -83,7 +119,7 @@ func consumePendingRetryRequestsLocked(store *ControllerStateStore, durable *Con
 		logx.Event("applied live retry approval for lease %s: %s", req.LeaseID, req.Reason)
 	}
 	if err := store.Commit(*durable); err == nil {
-		_ = os.Remove(path)
+		_ = os.WriteFile(path, nil, 0600)
 	}
 }
 
