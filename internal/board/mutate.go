@@ -22,6 +22,7 @@ type Update struct {
 	Category           string
 	Dependencies       string
 	BlockedBy          string
+	Note               string
 	ClearBlockedBy     bool
 	Completed          string
 	File               string
@@ -385,6 +386,9 @@ func setUnlocked(id string, update Update) (Task, error) {
 		if _, err := ValidateLifecycle(candidate, boardFileName(targetPath)); err != nil {
 			return Task{}, err
 		}
+		if err := validateActiveLaneAvailable(candidate, id); err != nil {
+			return Task{}, err
+		}
 	}
 
 	block := applyMetadata(source.block, update)
@@ -442,6 +446,32 @@ func setUnlocked(id string, update Update) (Task, error) {
 		result.BlockingTasks = update.BlockedBy
 	}
 	return result, nil
+}
+
+// validateActiveLaneAvailable prevents the Go board writer from assigning a
+// second In Progress task to a dev-agent lane. The lock held by Set makes this
+// check and the subsequent write one serialized transaction across processes.
+func validateActiveLaneAvailable(candidate Task, currentID string) error {
+	if candidate.Status != "In Progress" {
+		return nil
+	}
+	role, ok := config.DevAgentRoleForActiveSection(candidate.Section)
+	if !ok {
+		return nil // ValidateLifecycle reports malformed active lanes separately.
+	}
+	data, err := os.ReadFile(config.TasksFile)
+	if err != nil {
+		return err
+	}
+	for id, existing := range parseAllTasks(string(data), config.TasksFile) {
+		if id == currentID || existing.Status != "In Progress" {
+			continue
+		}
+		if existing.Section == candidate.Section || existing.Owner == role {
+			return fmt.Errorf("%s already has In Progress task %s; finish or move it before assigning %s", role, id, currentID)
+		}
+	}
+	return nil
 }
 
 func lifecycleChange(u Update) bool {
@@ -648,7 +678,11 @@ func applyMetadata(block string, u Update) string {
 	if len(add) > 0 {
 		lines = append(lines[:1], append(add, lines[1:]...)...)
 	}
-	return strings.Join(lines, "\n")
+	updated := strings.Join(lines, "\n")
+	if note := strings.TrimSpace(u.Note); note != "" {
+		updated = strings.TrimRight(updated, "\n") + "\n\n" + note + "\n"
+	}
+	return updated
 }
 
 func canonicalMetadataKey(key string) string {

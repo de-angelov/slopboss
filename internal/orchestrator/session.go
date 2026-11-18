@@ -153,7 +153,9 @@ Runtime Rules:
 - A dev-agent lane is occupied only by its In Progress task. Blocked or rejected tasks do not consume lane capacity; assign ready work into any lane with no In Progress task.
 - When a task becomes Blocked, immediately move it out of its named "Dev Agent N In Progress" section into the shared "Blocked Tasks" section, set Owner to Unassigned, preserve its branch and blocker evidence, then fill the freed lane with the highest-priority ready non-overlapping task. Do not leave a blocked task assigned to a dev agent.
 - Verification failures outside a dev task are not blockers. The dev agent notes them and continues; do not create a blocked lane for them.
-- Every concrete technical blocker must have an owning board task. If no existing task explicitly owns the fix, create a focused AFK task with slopboss board create, link its ID in the blocked task, and preserve exact failure evidence. Do not finish reconciliation with orphan blockers.
+- Every concrete technical blocker must have an owning board task. If no existing task explicitly owns the fix, create a focused AFK task with board create, then add its ID to the blocked task's Dependencies with board set --dependencies (preserving existing IDs). Do not use an unsupported --blocking-tasks flag. Record evidence with board set --note. Do not finish reconciliation with orphan blockers.
+- For every Slopboss board command, invoke the exact executable that launched this loop at %q with --dir %q; never rely on slopboss from PATH because it may be an older installation without board create.
+- Never edit BACKLOG.md, TASKS.md, or ARCHIVE.md directly with Python, sed, or shell redirection. All board mutations must use the serialized board CLI.
 - Once every dependency of a blocked task is archived as Done, move it from "Blocked Tasks" into a free "Dev Agent N In Progress" lane, set Owner to that agent and Status to In Progress, then add a progress note. Do not merely change its status while it remains unassigned.
 
 Efficiency Rules (keep this session small — you are hard-capped at %d turns):
@@ -162,7 +164,7 @@ Efficiency Rules (keep this session small — you are hard-capped at %d turns):
 - Do NOT slurp whole files (no full ARCHIVE.md read) and do NOT re-derive board state from git: no repo-wide 'grep -rn', no 'git log -N', no 'ls -R', no 'git fetch' or branch enumeration. Every command's output is re-sent on every later turn, so keep each output tiny and targeted.
 - Decide, then write. Apply your assignment/priority decisions in as few board edits as possible — batch edits to a file rather than many small rewrites.
 - If you cannot finish within the turn budget, apply the highest-priority board change first; the next grooming pass resumes from the updated board.
-`, maxTurns)
+`, slopbossExecutable(), config.RepoRoot, maxTurns)
 	if isAgentLeadTask(task) {
 		rules = fmt.Sprintf(`Role: Team Lead Agent
 Decide the next useful coordination actions from the supplied board and worker snapshot. Use slopboss board commands to make structural changes; do not edit shared board files directly. You may inspect and review relevant worker branches, and merge only after focused verification. Do not implement product code. Preserve uncertainty and report concrete evidence. If there is nothing useful to do, finish without changes. You are limited to %d turns.`, maxTurns)
@@ -216,6 +218,14 @@ func classifyCoordinationReport(path string) (SessionOutcome, string) {
 		return sessionBlocked, evidence
 	}
 	return sessionCompleted, evidence
+}
+
+func slopbossExecutable() string {
+	path, err := os.Executable()
+	if err != nil {
+		return "slopboss"
+	}
+	return path
 }
 
 // boardStateHash fingerprints the three board files so a Team Lead session that

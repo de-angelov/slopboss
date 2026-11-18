@@ -114,10 +114,10 @@ var boardCreateCmd = &cobra.Command{
 }
 
 var (
-	setOwner, setBranch, setStatus, setCategory, setDependencies, setBlockedBy string
-	setClearBlockedBy                                                          bool
-	setReconcileDuplicate                                                      bool
-	setFile, setSection, setSourceSection                                      string
+	setOwner, setBranch, setStatus, setCategory, setDependencies, setBlockedBy, setNote string
+	setClearBlockedBy                                                                   bool
+	setReconcileDuplicate                                                               bool
+	setFile, setSection, setSourceSection                                               string
 )
 
 var boardSetCmd = &cobra.Command{
@@ -130,12 +130,12 @@ When an ID is duplicated, pass --source-section to select its existing section.
 The task body is preserved.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		u := board.Update{Owner: setOwner, Branch: setBranch, Status: setStatus, Category: setCategory, Dependencies: setDependencies, BlockedBy: setBlockedBy, ClearBlockedBy: setClearBlockedBy, File: setFile, Section: setSection, SourceSection: setSourceSection, ReconcileDuplicate: setReconcileDuplicate}
+		u := board.Update{Owner: setOwner, Branch: setBranch, Status: setStatus, Category: setCategory, Dependencies: setDependencies, BlockedBy: setBlockedBy, Note: setNote, ClearBlockedBy: setClearBlockedBy, File: setFile, Section: setSection, SourceSection: setSourceSection, ReconcileDuplicate: setReconcileDuplicate}
 		if noBoardChanges(u) {
 			return fmt.Errorf("supply at least one field to update")
 		}
 		if u.ReconcileDuplicate {
-			if strings.TrimSpace(u.SourceSection) == "" || u.Owner != "" || u.Branch != "" || u.Status != "" || u.Category != "" || u.Dependencies != "" || u.BlockedBy != "" || u.ClearBlockedBy || u.File != "" || u.Section != "" {
+			if strings.TrimSpace(u.SourceSection) == "" || u.Owner != "" || u.Branch != "" || u.Status != "" || u.Category != "" || u.Dependencies != "" || u.BlockedBy != "" || u.Note != "" || u.ClearBlockedBy || u.File != "" || u.Section != "" {
 				return fmt.Errorf("--reconcile-duplicate requires only --source-section")
 			}
 			task, err := board.ReconcileDuplicate(args[0], u.SourceSection)
@@ -153,7 +153,7 @@ The task body is preserved.`,
 }
 
 func noBoardChanges(u board.Update) bool {
-	return strings.TrimSpace(u.Owner) == "" && strings.TrimSpace(u.Branch) == "" && strings.TrimSpace(u.Status) == "" && strings.TrimSpace(u.Category) == "" && strings.TrimSpace(u.Dependencies) == "" && strings.TrimSpace(u.BlockedBy) == "" && !u.ClearBlockedBy && strings.TrimSpace(u.File) == "" && strings.TrimSpace(u.Section) == "" && strings.TrimSpace(u.SourceSection) == "" && !u.ReconcileDuplicate
+	return strings.TrimSpace(u.Owner) == "" && strings.TrimSpace(u.Branch) == "" && strings.TrimSpace(u.Status) == "" && strings.TrimSpace(u.Category) == "" && strings.TrimSpace(u.Dependencies) == "" && strings.TrimSpace(u.BlockedBy) == "" && strings.TrimSpace(u.Note) == "" && !u.ClearBlockedBy && strings.TrimSpace(u.File) == "" && strings.TrimSpace(u.Section) == "" && strings.TrimSpace(u.SourceSection) == "" && !u.ReconcileDuplicate
 }
 
 func writeJSON(value any) error {
@@ -172,6 +172,7 @@ func init() {
 	boardSetCmd.Flags().StringVar(&setCategory, "category", "", "AFK or HITL")
 	boardSetCmd.Flags().StringVar(&setDependencies, "dependencies", "", "dependency list")
 	boardSetCmd.Flags().StringVar(&setBlockedBy, "blocked-by", "", "current blocker")
+	boardSetCmd.Flags().StringVar(&setNote, "note", "", "append a progress or blocker note to the task body")
 	boardSetCmd.Flags().BoolVar(&setClearBlockedBy, "clear-blocked-by", false, "remove the Blocked by field")
 	boardSetCmd.Flags().StringVar(&setFile, "file", "", "destination: backlog, tasks, or archive")
 	boardSetCmd.Flags().StringVar(&setSection, "section", "", "destination section; requires --file")
