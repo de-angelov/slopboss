@@ -128,8 +128,15 @@ func newBackendCmd(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if cmd.Process == nil {
 			return nil
 		}
-		// Negative PID targets the whole process group.
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		// Send SIGTERM to process group first for clean shutdown/flushing
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		// Escalate to SIGKILL if the process group does not terminate within 2 seconds
+		time.AfterFunc(2*time.Second, func() {
+			if cmd.Process != nil {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+		})
+		return nil
 	}
 	return cmd
 }

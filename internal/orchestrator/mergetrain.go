@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/de-angelov/slopboss/internal/board"
@@ -38,13 +39,28 @@ func FormatCommitMessage(taskID, taskTitle, rawMsg string) string {
 	return strings.Join(lines, "\n")
 }
 
-// RunCommandInWorkspace executes a shell command string in workspace with a timeout.
+// RunCommandInWorkspace executes a shell command string in workspace with a timeout
+// and isolated process group to prevent orphaned background processes.
 func RunCommandInWorkspace(ctx context.Context, workspace, command string) error {
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, "bash", "-lc", command)
 	cmd.Dir = workspace
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		time.AfterFunc(2*time.Second, func() {
+			if cmd.Process != nil {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+		})
+		return nil
+	}
 	cmd.Stdout = logx.Writer{}
 	cmd.Stderr = logx.Writer{}
 

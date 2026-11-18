@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPrepareBranchPreservesDirtyWorkspaceOnAssignedBranch(t *testing.T) {
@@ -124,5 +125,29 @@ func TestLastCommitMessageAndCommitAll(t *testing.T) {
 
 	if strings.TrimSpace(gotMsg) != wantMsg {
 		t.Fatalf("LastCommitMessage() = %q, want %q", gotMsg, wantMsg)
+	}
+}
+
+func TestCleanStaleIndexLock(t *testing.T) {
+	workspace := initGitWorkspace(t)
+	lockPath := filepath.Join(workspace, ".git", "index.lock")
+
+	// 1. Fresh lock (< 30s) should NOT be removed
+	if err := os.WriteFile(lockPath, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	CleanStaleIndexLock(workspace)
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		t.Fatal("expected fresh index.lock to NOT be removed")
+	}
+
+	// 2. Stale lock (> 30s) should be removed
+	oldTime := time.Now().Add(-60 * time.Second)
+	if err := os.Chtimes(lockPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	CleanStaleIndexLock(workspace)
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatal("expected stale index.lock to be removed")
 	}
 }

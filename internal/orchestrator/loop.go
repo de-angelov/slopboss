@@ -83,6 +83,11 @@ func RunLoopWithMode(parent context.Context, providerName, mode string, ui UI) e
 	reconcileDone := make(chan struct{})
 	go func() {
 		defer close(reconcileDone)
+		defer func() {
+			if r := recover(); r != nil {
+				logx.Event("recovered from panic in reconcile loop: %v", r)
+			}
+		}()
 		ticker := time.NewTicker(config.PollInterval)
 		defer ticker.Stop()
 		for {

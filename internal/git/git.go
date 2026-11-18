@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -32,7 +33,27 @@ func WorkspaceExists(role string) bool {
 	return err == nil && info.IsDir()
 }
 
+// CleanStaleIndexLock removes an orphaned .git/index.lock file if it was left behind
+// by a crashed, killed, or cancelled git process.
+func CleanStaleIndexLock(workspace string) {
+	if workspace == "" {
+		return
+	}
+	lockPath := filepath.Join(workspace, ".git", "index.lock")
+	info, err := os.Stat(lockPath)
+	if err != nil {
+		return
+	}
+	// If the lock file is older than 30 seconds, treat it as orphaned/stale
+	if time.Since(info.ModTime()) > 30*time.Second {
+		if err := os.Remove(lockPath); err == nil {
+			logx.Event("removed stale git index.lock in %s (age %v)", workspace, time.Since(info.ModTime()).Round(time.Second))
+		}
+	}
+}
+
 func CurrentBranchName(workspace string) string {
+	CleanStaleIndexLock(workspace)
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	cmd.Dir = workspace
 	out, err := cmd.Output()
@@ -43,6 +64,7 @@ func CurrentBranchName(workspace string) string {
 }
 
 func RunGit(workspace string, args ...string) {
+	CleanStaleIndexLock(workspace)
 	logx.Event("git %s [%s]", strings.Join(args, " "), workspace)
 
 	cmd := exec.Command("git", args...)
@@ -208,6 +230,7 @@ func MainContainsCommit(workspace string, commit string) bool {
 }
 
 func GitOutput(workspace string, args ...string) (string, error) {
+	CleanStaleIndexLock(workspace)
 	cmd := exec.Command("git", args...)
 	cmd.Dir = workspace
 	out, err := cmd.Output()
@@ -245,6 +268,7 @@ func SanitizeBranchPart(value string) string {
 }
 
 func RunGitChecked(workspace string, args ...string) error {
+	CleanStaleIndexLock(workspace)
 	logx.Event("git %s [%s]", strings.Join(args, " "), workspace)
 
 	cmd := exec.Command("git", args...)
@@ -323,6 +347,11 @@ func SquashMergeAndPush(workspace, branch, baseBranch, commitMessage string) (st
 		if attempt > 1 {
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 			logx.Event("retrying squash merge and push for %s (attempt %d/%d)", branch, attempt, maxRetries)
+			if err := RunGitChecked(workspace, "checkout", branch); err == nil {
+				if err := RunGitChecked(workspace, "fetch", "origin", baseBranch); err == nil {
+					_ = RunGitChecked(workspace, "rebase", "origin/"+baseBranch)
+				}
+			}
 		}
 
 		if err := RunGitChecked(workspace, "checkout", baseBranch); err != nil {

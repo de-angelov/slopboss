@@ -77,6 +77,11 @@ func startSession(role string, task board.Task, taskKey string, tasks []board.Ta
 		outcome := sessionUnknown
 		var evidence string
 		defer func() {
+			if r := recover(); r != nil {
+				logx.Event("recovered from panic in %s session: %v", role, r)
+				outcome = sessionFailed
+				evidence = fmt.Sprintf("panic: %v", r)
+			}
 			if outcome != sessionUnknown {
 				if err := reportSessionTerminal(leaseID, outcome, role, taskKey, evidence); err != nil {
 					logx.Event("cannot report %s terminal result: %v", role, err)
