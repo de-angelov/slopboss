@@ -124,7 +124,12 @@ func runAgent(ctx context.Context, role string, workspace string, task board.Tas
 		}
 	}
 
-	p := prompt.BuildPrompt(role, task, tasks, prompt.DevAgentRuntimeInstructions())
+	instructions := prompt.DevAgentRuntimeInstructions()
+	if executable, err := os.Executable(); err == nil {
+		instructions += "\nUse this exact command prefix for board operations: " + shellQuote(executable) + " --dir " + shellQuote(config.RepoRoot) + ". For example: " + shellQuote(executable) + " --dir " + shellQuote(config.RepoRoot) + " board set " + shellQuote(task.ID) + " --note \"progress notes\".\n"
+	}
+
+	p := prompt.BuildPrompt(role, task, tasks, instructions)
 
 	return runSessionWithReportAndModel(ctx, role, workspace, p, sessionProvider, "", model)
 }

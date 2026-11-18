@@ -381,6 +381,90 @@ func TestNormalizeTasksRepairsRepeatedDocumentWithoutLosingRecords(t *testing.T)
 	}
 }
 
+func TestSetAppendsNoteAndClearsBlockedBy(t *testing.T) {
+	dir := t.TempDir()
+	withBoardFiles(t, dir)
+	writeBoard(t, config.TasksFile, `# TASKS
+
+## Dev Agent 1 In Progress
+
+### Active Task
+Task ID: TASK-100
+Owner: Dev Agent 1
+Status: Blocked
+Blocked by: TASK-99
+
+Initial objective.
+`)
+
+	updated, err := Set("TASK-100", Update{
+		ClearBlockedBy: true,
+		Status:         "In Progress",
+		Note:           "Progress note: unblocked by dependency merge.",
+	})
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	if updated.BlockingTasks != "" {
+		t.Fatalf("expected BlockingTasks to be cleared, got %q", updated.BlockingTasks)
+	}
+	if !strings.Contains(updated.Body, "Progress note: unblocked by dependency merge.") {
+		t.Fatalf("expected updated body to contain note, got %q", updated.Body)
+	}
+
+	content, err := os.ReadFile(config.TasksFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	if strings.Contains(text, "Blocked by:") {
+		t.Fatalf("expected Blocked by to be removed from file, got:\n%s", text)
+	}
+	if !strings.Contains(text, "Progress note: unblocked by dependency merge.") {
+		t.Fatalf("expected file to contain note, got:\n%s", text)
+	}
+}
+
+func TestValidateActiveLaneRejectsDuplicateActiveLane(t *testing.T) {
+	dir := t.TempDir()
+	withBoardFiles(t, dir)
+	writeBoard(t, config.BacklogFile, `# BACKLOG
+
+## Backlog
+
+### Candidate Task
+Task ID: TASK-200
+Owner: Unassigned
+Status: Backlog
+
+Candidate task body.
+`)
+	writeBoard(t, config.TasksFile, `# TASKS
+
+## Dev Agent 1 In Progress
+
+### Existing Task
+Task ID: TASK-101
+Owner: Dev Agent 1
+Status: In Progress
+
+Existing active task body.
+`)
+
+	_, err := Set("TASK-200", Update{
+		File:    "tasks",
+		Section: "Dev Agent 1 In Progress",
+		Owner:   "Dev Agent 1",
+		Status:  "In Progress",
+	})
+	if err == nil {
+		t.Fatal("expected assigning a second In Progress task to Dev Agent 1 to fail, but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "already has In Progress task TASK-101") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
 func withBoardFiles(t *testing.T, root string) {
 	t.Helper()
 	oldRoot := config.RepoRoot

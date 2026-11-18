@@ -445,6 +445,12 @@ func setUnlocked(id string, update Update) (Task, error) {
 	if update.BlockedBy != "" {
 		result.BlockingTasks = update.BlockedBy
 	}
+	if update.ClearBlockedBy {
+		result.BlockingTasks = ""
+	}
+	if note := strings.TrimSpace(update.Note); note != "" {
+		result.Body = strings.TrimRight(result.Body, "\n") + "\n\n" + note
+	}
 	return result, nil
 }
 
