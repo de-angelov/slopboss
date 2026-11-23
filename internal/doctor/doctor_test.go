@@ -6,7 +6,41 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/de-angelov/slopboss/internal/board"
 )
+
+func TestDependencyCycles(t *testing.T) {
+	tasks := []board.Task{
+		{ID: "A", Dependencies: "B"}, {ID: "B", Dependencies: "A"},
+		{ID: "DOWNSTREAM", Dependencies: "A"}, {ID: "SELF", Dependencies: "SELF"},
+		{ID: "MISSING", Dependencies: "UNKNOWN"}, {ID: "DONE", Status: "Done", Dependencies: "DONE"},
+	}
+	got := dependencyCycles(tasks)
+	if len(got) != 2 || strings.Join(got[0], ",") != "A,B" || strings.Join(got[1], ",") != "SELF" {
+		t.Fatalf("unexpected cycles: %v", got)
+	}
+}
+
+func TestDoctorReportsDependencyCycle(t *testing.T) {
+	o := fixture(t, false)
+	read := o.ReadFile
+	o.ReadFile = func(path string) ([]byte, error) {
+		if filepath.Base(path) == "BACKLOG.md" {
+			return []byte("## Backlog\n\n### A\nTask ID: A-1\nOwner: Unassigned\nStatus: Backlog\nDependencies: B-1\n\n### B\nTask ID: B-1\nOwner: Unassigned\nStatus: Backlog\nDependencies: A-1\n"), nil
+		}
+		if filepath.Base(path) == "TASKS.md" {
+			return []byte("# Tasks\n"), nil
+		}
+		return read(path)
+	}
+	for _, f := range Check(o) {
+		if f.Level == "FAIL" && strings.Contains(f.Message, "dependency cycle among A-1, B-1") {
+			return
+		}
+	}
+	t.Fatal("doctor did not report cycle")
+}
 
 func fixture(t *testing.T, broken bool) Options {
 	t.Helper()

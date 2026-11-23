@@ -1,76 +1,65 @@
 package board
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
 
-var (
-	verificationSectionRe = regexp.MustCompile(`(?i)(?:^|\n)##+\s*Verification\s*\n([^#]+)`)
-	codeFenceRe           = regexp.MustCompile("(?s)```(?:sh|bash)?\\s*\\n?(.*?)\\n?```")
-	fullSuiteDiagnosticRe = regexp.MustCompile(`(?i)\s*(?:Full-suite diagnostic|Diagnostic full suite|Diagnostic suite|Full-suite|Diagnostic):.*$`)
-	trailingSentenceRe    = regexp.MustCompile(`(?:\.\s+[A-Z][a-zA-Z]+.*$)`)
-)
+var verificationHeading = regexp.MustCompile(`(?i)^#{2,}\s+verification\s*$`)
+var anotherHeading = regexp.MustCompile(`^#{1,}\s+`)
+var proseAfterCommand = regexp.MustCompile(`(?:\.\s+[A-Z][a-zA-Z]+\b|(?i:\b(?:full-suite diagnostic|diagnostic full suite|diagnostic suite|full-suite|diagnostic):))`)
 
-// ExtractVerification parses the targeted verification command from a task body.
-func ExtractVerification(body string) string {
-	if match := verificationSectionRe.FindStringSubmatch(body); len(match) > 1 {
-		content := strings.TrimSpace(match[1])
-		if fence := codeFenceRe.FindStringSubmatch(content); len(fence) > 1 {
-			cmd := strings.TrimSpace(fence[1])
-			return cleanVerificationCommand(cmd)
-		}
-		lines := strings.Split(content, "\n")
-		for _, l := range lines {
-			t := strings.TrimSpace(l)
-			if t != "" && !strings.HasPrefix(t, ">") {
-				return cleanVerificationCommand(t)
-			}
-		}
-	}
-
-	// Line-by-line search for inline "Verification:"
-	lines := strings.Split(body, "\n")
+// ParseVerification preserves fenced shell scripts and rejects ambiguous inline prose.
+func ParseVerification(body string) (string, error) {
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
 	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		trimmed = strings.TrimPrefix(trimmed, "- ")
-		trimmed = strings.TrimPrefix(trimmed, "* ")
-		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(lower, "verification:") {
-			val := strings.TrimSpace(trimmed[len("verification:"):])
-			// If subsequent lines exist and don't start with a new field (e.g. "Field:"), gather them
-			for j := i + 1; j < len(lines); j++ {
-				next := strings.TrimSpace(lines[j])
-				if next == "" || strings.HasPrefix(next, "#") || strings.Contains(next, ":") {
-					break
-				}
-				val += " " + next
-			}
-			return cleanVerificationCommand(val)
+		if !verificationHeading.MatchString(strings.TrimSpace(line)) {
+			continue
 		}
+		for j := i + 1; j < len(lines); j++ {
+			t := strings.TrimSpace(lines[j])
+			if t == "" || strings.HasPrefix(t, ">") {
+				continue
+			}
+			if anotherHeading.MatchString(t) {
+				return "", nil
+			}
+			if strings.HasPrefix(t, "```") {
+				lang := strings.TrimSpace(strings.TrimPrefix(t, "```"))
+				if lang != "" && lang != "sh" && lang != "bash" {
+					return "", fmt.Errorf("verification fence must use sh or bash")
+				}
+				for k := j + 1; k < len(lines); k++ {
+					if strings.TrimSpace(lines[k]) == "```" {
+						return strings.Join(lines[j+1:k], "\n"), nil
+					}
+				}
+				return "", fmt.Errorf("unclosed verification code fence")
+			}
+			return parseInlineVerification(t)
+		}
+		return "", nil
 	}
-
-	return ""
-}
-
-func cleanVerificationCommand(raw string) string {
-	cleaned := fullSuiteDiagnosticRe.ReplaceAllString(raw, "")
-	cleaned = trailingSentenceRe.ReplaceAllString(cleaned, "")
-	cleaned = strings.TrimSpace(cleaned)
-
-	lines := strings.Split(cleaned, "\n")
-	var parts []string
 	for _, line := range lines {
 		t := strings.TrimSpace(line)
-		if t != "" {
-			parts = append(parts, t)
+		t = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(t, "- "), "* "))
+		if strings.HasPrefix(strings.ToLower(t), "verification:") {
+			return parseInlineVerification(strings.TrimSpace(t[len("verification:"):]))
 		}
 	}
-	res := strings.Join(parts, " ")
+	return "", nil
+}
 
-	if strings.HasSuffix(res, ".") && !strings.HasSuffix(res, "..") {
-		res = strings.TrimSuffix(res, ".")
+func parseInlineVerification(command string) (string, error) {
+	if proseAfterCommand.MatchString(command) {
+		return "", fmt.Errorf("ambiguous verification command; put the exact shell script in a fenced sh block")
 	}
+	return command, nil
+}
 
-	return strings.TrimSpace(res)
+// ExtractVerification returns the command when it can be parsed unambiguously.
+func ExtractVerification(body string) string {
+	command, _ := ParseVerification(body)
+	return command
 }

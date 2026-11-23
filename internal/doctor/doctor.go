@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/de-angelov/slopboss/internal/board"
@@ -80,6 +81,9 @@ func Check(opts Options) []Finding {
 			}
 		}
 	}
+	for _, cycle := range dependencyCycles(all) {
+		add("FAIL", strings.Join(cycle, ", "), "dependency cycle among "+strings.Join(cycle, ", ")+"; remove a dependency to unblock these tasks")
+	}
 	add("PASS", "board", "board files and lifecycle metadata checked")
 	if o.Provider == "" {
 		o.Provider = "codex"
@@ -127,6 +131,73 @@ func Check(opts Options) []Finding {
 		}
 	}
 	return out
+}
+
+// dependencyCycles finds strongly connected components, excluding completed tasks
+// and tasks that merely depend on a cycle.
+func dependencyCycles(tasks []board.Task) [][]string {
+	graph := map[string][]string{}
+	for _, t := range tasks {
+		if t.ID != "" && !strings.EqualFold(t.Status, "Done") {
+			graph[t.ID] = dependencyIDs(t.Dependencies)
+		}
+	}
+	indices, low, onStack := map[string]int{}, map[string]int{}, map[string]bool{}
+	var stack []string
+	var cycles [][]string
+	next := 0
+	var visit func(string)
+	visit = func(id string) {
+		next++
+		indices[id], low[id] = next, next
+		stack = append(stack, id)
+		onStack[id] = true
+		self := false
+		for _, dep := range graph[id] {
+			if dep == id {
+				self = true
+			}
+			if _, exists := graph[dep]; !exists {
+				continue
+			}
+			if indices[dep] == 0 {
+				visit(dep)
+				if low[dep] < low[id] {
+					low[id] = low[dep]
+				}
+			} else if onStack[dep] && indices[dep] < low[id] {
+				low[id] = indices[dep]
+			}
+		}
+		if low[id] != indices[id] {
+			return
+		}
+		var component []string
+		for {
+			last := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			onStack[last] = false
+			component = append(component, last)
+			if last == id {
+				break
+			}
+		}
+		if len(component) > 1 || self {
+			sort.Strings(component)
+			cycles = append(cycles, component)
+		}
+	}
+	ids := make([]string, 0, len(graph))
+	for id := range graph {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if indices[id] == 0 {
+			visit(id)
+		}
+	}
+	return cycles
 }
 func dependencyIDs(s string) []string {
 	var out []string

@@ -84,7 +84,10 @@ func LandCompletedTask(ctx context.Context, task board.Task, role, workspace str
 
 	logx.Event("merge train: evaluating %s on branch %s (%s)", task.ID, task.Branch, role)
 
-	verificationCmd := board.ExtractVerification(task.Body)
+	verificationCmd, err := board.ParseVerification(task.Body)
+	if err != nil {
+		return sessionFailed, fmt.Sprintf("invalid verification for %s: %v", task.ID, err)
+	}
 
 	// Step 1: Check if workspace has uncommitted changes.
 	if git.WorkspaceHasChanges(workspace) {

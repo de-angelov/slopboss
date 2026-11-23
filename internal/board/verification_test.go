@@ -16,24 +16,14 @@ func TestExtractVerification(t *testing.T) {
 			want: "npx vitest run tests/syntax.test.ts",
 		},
 		{
-			name: "inline with trailing period",
-			body: "Objective: foo\nVerification: npx vitest run tests/syntax.test.ts.",
-			want: "npx vitest run tests/syntax.test.ts",
+			name: "inline current directory",
+			body: "Verification: go test .",
+			want: "go test .",
 		},
 		{
-			name: "inline with trailing instruction sentence",
-			body: "Objective: foo\nVerification: npm run docs:check; git diff --check. Compare the document with the TASK-095 decision.",
-			want: "npm run docs:check; git diff --check",
-		},
-		{
-			name: "inline with full-suite diagnostic",
-			body: "Objective: foo\nVerification: npx vitest run tests/formatter.test.ts --reporter=dot; npm run build. Full-suite diagnostic: npm test.",
-			want: "npx vitest run tests/formatter.test.ts --reporter=dot; npm run build",
-		},
-		{
-			name: "inline with diagnostic full suite wording",
-			body: "Objective: foo\nVerification: npx vitest run tests/formatter.test.ts tests/parser.test.ts --reporter=dot; npm run build. Diagnostic full suite: npm test.",
-			want: "npx vitest run tests/formatter.test.ts tests/parser.test.ts --reporter=dot; npm run build",
+			name: "multiline fence with comments",
+			body: "## Verification\n```sh\nset -e\n# check\ngo test .\n```\n## Next\ntext",
+			want: "set -e\n# check\ngo test .",
 		},
 		{
 			name: "section with code fence",
@@ -59,5 +49,13 @@ func TestExtractVerification(t *testing.T) {
 				t.Fatalf("ExtractVerification() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseVerificationRejectsAmbiguous(t *testing.T) {
+	for _, body := range []string{"Verification: npm test. Check results.", "## Verification\n```sh\necho hi", "## Verification\n```python\nprint(1)\n```"} {
+		if _, err := ParseVerification(body); err == nil {
+			t.Errorf("expected error for %q", body)
+		}
 	}
 }

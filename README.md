@@ -280,6 +280,11 @@ and respects the OS `prefers-color-scheme` on first load.
 The Team Lead moves it into a lane in `TASKS.md`; a Dev Agent implements it on
 its branch and reports the result. The Team Lead uses `slopboss board set` to
 update lifecycle metadata and move completed work into `ARCHIVE.md`.
+For verification, use a `## Verification` section containing a fenced `sh` or
+`bash` script. Its lines are passed to the shell unchanged; add `set -e` if a
+script should stop when an intermediate command fails. Single-line
+`Verification: ...` commands remain supported. If a command contains explanatory
+prose, move the exact command into a fence: ambiguous inline text stops landing.
 Board commands serialize their writes using `workspaces/board.lock`. Manual
 edits do not acquire that lock; stop the loop and any board commands before
 editing board files directly.

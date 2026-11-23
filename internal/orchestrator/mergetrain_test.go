@@ -136,6 +136,20 @@ func TestLandCompletedTaskAutoCommitsAndSquashes(t *testing.T) {
 		Body:   "Objective: Implement feature\nVerification: test -f feature.txt",
 	}
 
+	initialHead := runCmdOutput(t, tempDir, "git", "--git-dir", remoteDir, "rev-parse", "refs/heads/main")
+	failingTask := task
+	failingTask.Body = "## Verification\n```sh\ntest -f feature.txt\nfalse\n```"
+	if outcome, _ := LandCompletedTask(context.Background(), failingTask, "Dev Agent 1", workspace); outcome != sessionFailed {
+		t.Fatal("failed verification must prevent landing")
+	}
+	if got := runCmdOutput(t, tempDir, "git", "--git-dir", remoteDir, "rev-parse", "refs/heads/main"); got != initialHead {
+		t.Fatal("failed verification changed remote main")
+	}
+	archiveBefore, err := os.ReadFile(archiveFile)
+	if err != nil || strings.Contains(string(archiveBefore), "TASK-001") {
+		t.Fatalf("failed verification archived task: %s (%v)", archiveBefore, err)
+	}
+
 	outcome, evidence := LandCompletedTask(context.Background(), task, "Dev Agent 1", workspace)
 	if outcome != sessionCompleted {
 		t.Fatalf("LandCompletedTask failed: outcome=%v, evidence=%s", outcome, evidence)
@@ -226,6 +240,74 @@ func TestLandCompletedTaskZeroCommitAudit(t *testing.T) {
 	}
 	if !strings.Contains(string(archiveData), "TASK-079") {
 		t.Fatalf("expected ARCHIVE.md to contain TASK-079, got: %s", string(archiveData))
+	}
+}
+
+func TestConcurrentLandingsReachRemoteAndArchive(t *testing.T) {
+	dir := t.TempDir()
+	remote := filepath.Join(dir, "remote.git")
+	w1, w2 := filepath.Join(dir, "one"), filepath.Join(dir, "two")
+	runCmd(t, dir, "git", "init", "--bare", "-b", "main", remote)
+	runCmd(t, dir, "git", "clone", remote, w1)
+	runCmd(t, w1, "git", "config", "user.email", "test@example.com")
+	runCmd(t, w1, "git", "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(w1, "README"), []byte("initial\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runCmd(t, w1, "git", "add", "README")
+	runCmd(t, w1, "git", "commit", "-m", "initial")
+	runCmd(t, w1, "git", "push", "origin", "main")
+	runCmd(t, dir, "git", "clone", remote, w2)
+	runCmd(t, w2, "git", "config", "user.email", "test@example.com")
+	runCmd(t, w2, "git", "config", "user.name", "Test User")
+	for i, w := range []string{w1, w2} {
+		branch := []string{"agent/1/one", "agent/2/two"}[i]
+		file := []string{"one.txt", "two.txt"}[i]
+		runCmd(t, w, "git", "checkout", "-b", branch)
+		if err := os.WriteFile(filepath.Join(w, file), []byte(file), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runCmd(t, w, "git", "add", file)
+		runCmd(t, w, "git", "commit", "-m", file)
+	}
+	boardDir := filepath.Join(dir, "board")
+	if err := os.Mkdir(boardDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	config.RepoRoot, config.TasksFile = boardDir, filepath.Join(boardDir, "TASKS.md")
+	config.BacklogFile, config.ArchiveFile, config.BaseBranch = filepath.Join(boardDir, "BACKLOG.md"), filepath.Join(boardDir, "ARCHIVE.md"), "main"
+	for file, content := range map[string]string{
+		config.TasksFile:   "# TASKS\n\n## Dev Agent 1 In Progress\n\n### One\nTask ID: T-1\nOwner: Dev Agent 1\nBranch: agent/1/one\nStatus: In Progress\n\n## Dev Agent 2 In Progress\n\n### Two\nTask ID: T-2\nOwner: Dev Agent 2\nBranch: agent/2/two\nStatus: In Progress\n",
+		config.BacklogFile: "# BACKLOG\n\n## Backlog\n", config.ArchiveFile: "# ARCHIVE\n\n## Done\n",
+	} {
+		if err := os.WriteFile(file, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tasks := []board.Task{{ID: "T-1", Title: "One", Owner: "Dev Agent 1", Branch: "agent/1/one", Body: "Verification: test -f one.txt"}, {ID: "T-2", Title: "Two", Owner: "Dev Agent 2", Branch: "agent/2/two", Body: "Verification: test -f two.txt"}}
+	results := make(chan string, 2)
+	for i, workspace := range []string{w1, w2} {
+		task := tasks[i]
+		go func() {
+			outcome, evidence := LandCompletedTask(context.Background(), task, task.Owner, workspace)
+			if outcome != sessionCompleted {
+				results <- evidence
+			} else {
+				results <- ""
+			}
+		}()
+	}
+	for range 2 {
+		if err := <-results; err != "" {
+			t.Errorf("landing failed: %s", err)
+		}
+	}
+	for _, file := range []string{"one.txt", "two.txt"} {
+		runCmd(t, dir, "git", "--git-dir", remote, "cat-file", "-e", "main:"+file)
+	}
+	archive, err := os.ReadFile(config.ArchiveFile)
+	if err != nil || !strings.Contains(string(archive), "T-1") || !strings.Contains(string(archive), "T-2") {
+		t.Fatalf("archive: %s (%v)", archive, err)
 	}
 }
 
