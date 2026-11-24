@@ -285,6 +285,10 @@ For verification, use a `## Verification` section containing a fenced `sh` or
 script should stop when an intermediate command fails. Single-line
 `Verification: ...` commands remain supported. If a command contains explanatory
 prose, move the exact command into a fence: ambiguous inline text stops landing.
+`slopboss board create` checks that verification is parseable and nonempty before
+creating a task. Place `Verification:` on its own line, or use a heading and
+fenced shell block; do not embed the label in a paragraph. Put human inspection
+instructions outside the shell command.
 Board commands serialize their writes using `workspaces/board.lock`. Manual
 edits do not acquire that lock; stop the loop and any board commands before
 editing board files directly.

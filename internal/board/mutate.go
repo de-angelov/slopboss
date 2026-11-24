@@ -192,6 +192,13 @@ func validateTaskBody(body string) error {
 			return fmt.Errorf("task body is missing required section %q", section)
 		}
 	}
+	command, err := ParseVerification(body)
+	if err != nil {
+		return fmt.Errorf("invalid verification: %w; put the verification command under its own Verification heading in a fenced sh block", err)
+	}
+	if strings.TrimSpace(command) == "" {
+		return fmt.Errorf("task body needs a standalone Verification field or heading with an executable command; put the exact command in a fenced sh block and explanatory steps outside it")
+	}
 	return nil
 }
 

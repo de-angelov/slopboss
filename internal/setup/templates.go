@@ -399,8 +399,11 @@ Every task must include: Task ID, Category (AFK/HITL), Owner, Branch, Status,
 Dependencies, Blocking tasks, and body sections for Objective (one sentence),
 Scope, Out of Scope, Acceptance Criteria, and Verification (the exact command or
 steps). Implementation agents should never need to infer missing scope.
-In Scope, provide the concrete target file paths. In Verification, give the
-targeted test command first, and list the full-suite command only as a diagnostic.
+In Scope, provide the concrete target file paths. Put Verification on its own
+line or heading, with an executable targeted test command. Prefer a fenced sh
+block containing only the exact shell commands; put explanatory steps and
+full-suite diagnostic instructions outside the fence. Do not put a Verification
+label in the middle of a prose paragraph.
 
 Use Status: Backlog for unassigned tasks in BACKLOG.md. Do not write
 Status: Ready.
