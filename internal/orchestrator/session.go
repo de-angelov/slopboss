@@ -192,7 +192,7 @@ Decide the next useful coordination actions from the supplied board and worker s
 			return sessionBlocked, "cannot close coordination report: " + err.Error()
 		}
 		defer os.Remove(reportPath)
-		rules += "\nBefore finishing, call the exact executable with coordination report --status STATUS --summary SUMMARY, choosing exactly one STATUS: acted, idle, or blocked. Use blocked if an intended action failed or remains uncertain; use idle only when no action is needed. A missing report requires human review.\n"
+		rules += "\nBefore finishing, call the exact executable with coordination report --status STATUS --summary SUMMARY, choosing exactly one STATUS: acted, idle, or blocked. Report idle when the only pending work is a running or unresolved worker that the loop can revisit later; do not attempt to resume it while it runs. Use acted if you completed an independent coordination action. Use blocked when an action cannot safely progress without intervention, recording exact evidence. A missing report requires human review.\n"
 	}
 	p := prompt.BuildPrompt(teamLeadRole, task, tasks, rules)
 

@@ -49,3 +49,17 @@ func TestTaskBodyVerificationFormats(t *testing.T) {
 		})
 	}
 }
+
+func TestVerificationPrefersExplicitFenceAfterPrerequisite(t *testing.T) {
+	body := "## Verification\nPrerequisite: dependencies are installed.\n```sh\nset -e\nnpm run build\nnpm test\n```\nInspect output.\n"
+	got, err := ParseVerification(body)
+	if err != nil || got != "set -e\nnpm run build\nnpm test" {
+		t.Fatalf("ParseVerification = %q, %v; want fenced script", got, err)
+	}
+}
+
+func TestVerificationRejectsPrerequisiteWithoutCommand(t *testing.T) {
+	if _, err := ParseVerification("## Verification\nPrerequisite: dependencies are installed."); err == nil {
+		t.Fatal("expected an error instead of executing prerequisite prose")
+	}
+}
