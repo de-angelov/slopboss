@@ -128,8 +128,10 @@ that recorded request once and does not restart a worker without terminal eviden
 Running the command after a later session has finished requests another session.
 Agent mode is experimental: worker outcome evidence currently records the process
 result, and agent decisions are not a substitute for checking merge and test evidence.
-The Team Lead records a structured `acted`, `idle`, or `blocked` result with a
-summary. A missing or blocked result requires review and is not silently treated
+The Team Lead records a structured `acted`, `idle`, `waiting`, or `blocked` result
+with a summary. `waiting` records that an active or unresolved worker must finish;
+the controller waits without retrying the same snapshot and wakes the lead when
+the board or a worker result changes. A missing or blocked result requires review and is not silently treated
 as success. After investigating, stop the controller and approve one retry with
 `slopboss --dir <board> recover "Team Lead Agent" --retry --reason "what changed"`.
 The prior outcome and the reason for retry remain in controller state.
