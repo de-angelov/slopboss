@@ -8,6 +8,30 @@ import (
 	"github.com/de-angelov/slopboss/internal/config"
 )
 
+func TestMainCommitClaimDisambiguatesBaseAndBranchClaims(t *testing.T) {
+	oldBase := config.BaseBranch
+	t.Cleanup(func() { config.BaseBranch = oldBase })
+
+	tests := []struct {
+		name, base, line, want string
+	}{
+		{"base before landed commit", "main", "Squash-merged into `main` as commit `cb27433`", "cb27433"},
+		{"landed commit before base", "main", "landed commit `cb27433` on origin/main", "cb27433"},
+		{"branch then main on same line", "main", "Pushed branch at commit `dd63d44`; squash-merged into `main` as commit `cb27433`", "cb27433"},
+		{"branch claim only", "main", "Pushed branch `agent/1/foo` at commit `dd63d44`", ""},
+		{"configured non-main base", "develop", "landed commit `cb27433` on origin/develop", "cb27433"},
+		{"other base ignored", "develop", "landed commit `cb27433` on origin/main", ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config.BaseBranch = test.base
+			if got := mainCommitClaim(test.line); got != test.want {
+				t.Fatalf("mainCommitClaim(%q) = %q, want %q", test.line, got, test.want)
+			}
+		})
+	}
+}
+
 func TestArchivedCompletionsExtractMainCommitClaim(t *testing.T) {
 	oldArchive := config.ArchiveFile
 	config.ArchiveFile = filepath.Join(t.TempDir(), "ARCHIVE.md")
