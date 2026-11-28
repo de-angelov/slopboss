@@ -17,13 +17,14 @@ func ParseVerification(body string) (string, error) {
 		if !verificationHeading.MatchString(strings.TrimSpace(line)) {
 			continue
 		}
+		first := ""
 		for j := i + 1; j < len(lines); j++ {
 			t := strings.TrimSpace(lines[j])
 			if t == "" || strings.HasPrefix(t, ">") {
 				continue
 			}
 			if anotherHeading.MatchString(t) {
-				return "", nil
+				break
 			}
 			if strings.HasPrefix(t, "```") {
 				lang := strings.TrimSpace(strings.TrimPrefix(t, "```"))
@@ -37,21 +38,33 @@ func ParseVerification(body string) (string, error) {
 				}
 				return "", fmt.Errorf("unclosed verification code fence")
 			}
-			return parseInlineVerification(t)
+			if first == "" {
+				first = t
+			}
+		}
+		if first != "" {
+			return parseInlineVerification(first)
 		}
 		return "", nil
 	}
-	for _, line := range lines {
+	for i, line := range lines {
 		t := strings.TrimSpace(line)
 		t = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(t, "- "), "* "))
 		if strings.HasPrefix(strings.ToLower(t), "verification:") {
-			return parseInlineVerification(strings.TrimSpace(t[len("verification:"):]))
+			command := strings.TrimSpace(t[len("verification:"):])
+			if command != "" {
+				return parseInlineVerification(command)
+			}
+			return ParseVerification("## Verification\n" + strings.Join(lines[i+1:], "\n"))
 		}
 	}
 	return "", nil
 }
 
 func parseInlineVerification(command string) (string, error) {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(command)), "prerequisite:") {
+		return "", fmt.Errorf("verification contains a prerequisite but no command; put the exact shell script in a fenced sh block")
+	}
 	if proseAfterCommand.MatchString(command) {
 		return "", fmt.Errorf("ambiguous verification command; put the exact shell script in a fenced sh block")
 	}
