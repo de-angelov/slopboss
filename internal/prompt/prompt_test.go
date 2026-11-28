@@ -198,3 +198,36 @@ func TestBuildPromptKeepsStaticPrefixBeforePerRunContext(t *testing.T) {
 		}
 	}
 }
+
+func TestPromptControllerPrecedenceOverridesLegacyMergeAndArchiveDirections(t *testing.T) {
+	oldAgents, oldDev, oldLead, oldTech := config.AgentsFile, config.DevAgentInstructionsFile, config.TlAgentInstructionsFile, config.TechFile
+	dir := t.TempDir()
+	config.AgentsFile = filepath.Join(dir, "AGENTS.md")
+	config.DevAgentInstructionsFile = filepath.Join(dir, "DEV_AGENT.md")
+	config.TlAgentInstructionsFile = filepath.Join(dir, "TEAM_LEAD_AGENT.md")
+	config.TechFile = filepath.Join(dir, "TECH.md")
+	t.Cleanup(func() {
+		config.AgentsFile, config.DevAgentInstructionsFile, config.TlAgentInstructionsFile, config.TechFile = oldAgents, oldDev, oldLead, oldTech
+	})
+	legacy := "Workers must squash-merge completed work into product main and move completed tasks to ARCHIVE.md."
+	for path, content := range map[string]string{config.AgentsFile: legacy, config.DevAgentInstructionsFile: legacy, config.TlAgentInstructionsFile: legacy, config.TechFile: "tech"} {
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, role := range []string{config.TeamLeadRole, config.DevAgent1Role} {
+		built := BuildPrompt(role, board.Task{}, nil, "legacy runtime says merge and archive")
+		if !strings.Contains(built, "Controller-managed runtime precedence (overrides conflicting instructions above)") {
+			t.Fatalf("%s prompt missing controller precedence:\n%s", role, built)
+		}
+		if role == config.TeamLeadRole && (!strings.Contains(built, "Team Lead plans and assigns work") || !strings.Contains(built, "handles worker failures") || !strings.Contains(built, "Team Lead does not verify, land, or archive worker changes")) {
+			t.Fatalf("lead prompt missing ownership:\n%s", built)
+		}
+		if role == config.DevAgent1Role && (!strings.Contains(built, "Workers implement assigned tasks") || !strings.Contains(built, "report execution evidence") || !strings.Contains(built, "Workers do not merge, land, or archive tasks")) {
+			t.Fatalf("worker prompt missing ownership:\n%s", built)
+		}
+		if !strings.Contains(built, legacy) {
+			t.Fatalf("expected legacy guidance preserved in %s prompt", role)
+		}
+	}
+}

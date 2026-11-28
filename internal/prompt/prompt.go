@@ -54,6 +54,17 @@ Runtime Rules:
 ` + DependencyInstallRules + "\n" + TestingDisciplineRules + "\n" + RebaseAuditRules + "\n"
 }
 
+// ControllerManagedPrecedence makes the live workflow authoritative over legacy
+// merge/archive instructions in repository and role guidance.
+func ControllerManagedPrecedence(role string) string {
+	if role == config.TeamLeadRole {
+		return `Controller-managed runtime precedence (overrides conflicting instructions above):
+- Team Lead plans and assigns work, and handles worker failures. The Team Lead does not verify, land, or archive worker changes; the controller performs those steps.`
+	}
+	return `Controller-managed runtime precedence (overrides conflicting instructions above):
+- Workers implement assigned tasks, run required checks, and report execution evidence. Workers do not merge, land, or archive tasks; the controller verifies, lands, and archives completed work.`
+}
+
 // BuildPrompt assembles a full session prompt for role/task. The static prefix is
 // identical for every session of a given role (cacheable); only the board context
 // and active task vary per run.
@@ -100,7 +111,9 @@ a narrowly scoped read is necessary.
 ================ RUNTIME INSTRUCTIONS ================
 
 %s
-`, role, config.RepoRoot, config.BacklogFile, config.TasksFile, config.ArchiveFile, commonInstructions, specificInstructions, tech, roleInstructions)
+
+%s
+`, role, config.RepoRoot, config.BacklogFile, config.TasksFile, config.ArchiveFile, commonInstructions, specificInstructions, tech, roleInstructions, ControllerManagedPrecedence(role))
 
 	perRunSuffix := fmt.Sprintf(`
 ================ PER-RUN CONTEXT (changes every session) ================
