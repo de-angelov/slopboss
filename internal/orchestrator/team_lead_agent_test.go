@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -204,5 +205,23 @@ func TestCoordinationUsesExactControllerExecutable(t *testing.T) {
 	}
 	if got := shellQuote("/tmp/a'b"); got != "'/tmp/a'\\''b'" {
 		t.Fatalf("shellQuote = %q", got)
+	}
+}
+
+func TestTeamLeadModesPreserveControllerOwnershipAndRecovery(t *testing.T) {
+	planner := fmt.Sprintf(`Maintain sensible backlog priorities. %s`, teamLeadOwnershipRule)
+	agent := coordinationAction(nil, nil, ControllerState{}).Task.Body
+	for mode, prompt := range map[string]string{"planner": planner, "agent": agent} {
+		for _, required := range []string{"controller owns landing verification", "serialization", "merge evidence", "archive updates", "Investigate failures", "assign ready work", "resume"} {
+			if !strings.Contains(strings.ToLower(prompt), strings.ToLower(required)) {
+				t.Errorf("%s prompt missing %q", mode, required)
+			}
+		}
+		if strings.Contains(strings.ToLower(prompt), "squash-merge") || strings.Contains(strings.ToLower(prompt), "merge only after focused verification") || strings.Contains(strings.ToLower(prompt), "archive them") {
+			t.Errorf("%s prompt authorizes lead landing or archive", mode)
+		}
+	}
+	if !strings.Contains(agent, "If a worker is unresolved, do not assume it stopped or reassign its work") || !strings.Contains(agent, "do not resume or reassign it") {
+		t.Error("agent prompt lost unresolved-worker safeguards")
 	}
 }
