@@ -100,27 +100,38 @@ func TestDevAgentPromptIncludesTokenGuardrails(t *testing.T) {
 		"do not invent an interaction harness",
 		"avoid adding more test code than implementation code",
 		"Verification failures outside the assigned task are not blockers",
-		"do not change the assigned task to Blocked",
-		"note the failing command and path in the task's progress notes",
+		"do not change task status",
+		"report the failing command and path to the controller",
+		"then continue; do not fix unrelated files",
 		"Your targeted tests and build are the merge gate",
 		"Do not use the full suite as a gate",
 		"Dependency install discipline",
 		"timeout 10m npm install",
 		"Clean partial install artifacts",
-		"mark the task Blocked in TASKS.md",
-		"commit the corresponding lockfile",
+		"report the blocker to the controller",
+		"include the corresponding lockfile",
 		"Do not leave package-manager install processes running",
-		"Rebase audit discipline",
 		"Report execution evidence only",
-		"Do not directly mutate shared board files or shared board/controller state",
-		"Team Lead is the planning and review proxy for board lifecycle actions",
-		"git fetch origin",
-		"git rebase origin",
-		"git diff --name-only --diff-filter=U",
-		"git diff --check",
+		"Report progress and blocker evidence to the controller",
 	} {
 		if !strings.Contains(built, want) {
 			t.Fatalf("prompt missing %q\n%s", want, built)
+		}
+	}
+	for _, unwanted := range []string{
+		"Rebase audit discipline",
+		"git rebase origin",
+		"push to main",
+		"push product main",
+		"push the assigned branch",
+		"squash-merge completed work",
+		"move completed tasks to ARCHIVE.md",
+		"mark the task Blocked in TASKS.md",
+		"board set TASK-ID",
+		"note the failing command and path in the task",
+	} {
+		if strings.Contains(built, unwanted) {
+			t.Fatalf("worker prompt contains lifecycle instruction %q\n%s", unwanted, built)
 		}
 	}
 }
