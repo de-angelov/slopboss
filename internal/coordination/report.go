@@ -18,9 +18,9 @@ type Report struct {
 
 func (r Report) Validate() error {
 	switch r.Status {
-	case "acted", "idle", "blocked":
+	case "acted", "idle", "waiting", "blocked":
 	default:
-		return fmt.Errorf("status must be acted, idle, or blocked")
+		return fmt.Errorf("status must be acted, idle, waiting, or blocked")
 	}
 	if strings.TrimSpace(r.Summary) == "" || len(r.Summary) > 2000 {
 		return fmt.Errorf("summary must be 1 to 2000 characters")

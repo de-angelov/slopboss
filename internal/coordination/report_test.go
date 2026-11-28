@@ -7,7 +7,7 @@ import (
 
 func TestWriteReportRequiresValidEvidence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "report.json")
-	for _, r := range []Report{{Status: "idle"}, {Status: "unknown", Summary: "x"}, {Status: "blocked", Summary: " "}} {
+	for _, r := range []Report{{Status: "idle"}, {Status: "unknown", Summary: "x"}, {Status: "blocked", Summary: " "}, {Status: "waiting", Summary: " "}} {
 		if err := WriteReport(path, r); err == nil {
 			t.Fatalf("accepted %#v", r)
 		}
@@ -19,5 +19,14 @@ func TestWriteReportRequiresValidEvidence(t *testing.T) {
 	got, err := ReadReport(path)
 	if err != nil || got != want {
 		t.Fatalf("got %#v, %v", got, err)
+	}
+
+	waiting := Report{Status: "waiting", Summary: "worker lease unresolved"}
+	if err := WriteReport(path, waiting); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ReadReport(path)
+	if err != nil || got != waiting {
+		t.Fatalf("waiting report got %#v, %v", got, err)
 	}
 }
