@@ -74,6 +74,8 @@ func TestCoordinationPersistsNoOpAndWakesOnChange(t *testing.T) {
 	}
 }
 
+// Regression case authored in f532fd9: retain the wakeup after a durable
+// worker terminal result while preserving the no-op behavior before it lands.
 func TestWaitingCoordinationWakesWhenWorkerFinishes(t *testing.T) {
 	withRetryTestState(t)
 	oldStore, oldLaunch, oldWorkspace := controllerStateStore, launchControllerSession, controllerWorkspaceExists

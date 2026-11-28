@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,6 +165,42 @@ func TestRecoveryRetryCountComesFromDurableAttempt(t *testing.T) {
 	got, retry, _ := recoveryLeaseDecision(state, devAgent1Role, "id")
 	if retry || got.Attempt != config.MaxFailedSessionRetries+1 {
 		t.Fatalf("durable exhaustion decision = %#v, launch %v", got, retry)
+	}
+}
+
+func TestStaleWorkerCoordinationBlockRetriesOnlyForChangedEvidenceAndWithinBound(t *testing.T) {
+	old := agentLeadPrefix + "old-snapshot"
+	lease := ControllerWorkerLease{
+		Intent: ControllerTaskIntent{Role: teamLeadRole, TaskID: old}, LeaseID: "old", Attempt: 1,
+		Terminal: &ControllerTerminalResult{Outcome: string(sessionBlocked), Evidence: "coordination blocked: transient worker evidence is stale"},
+	}
+	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
+	if _, retry, reason := recoveryLeaseDecision(state, teamLeadRole, lease.LeaseID); retry || !strings.Contains(reason, "coordination requires review") {
+		t.Fatalf("unchanged evidence decision = retry %v, reason %q", retry, reason)
+	}
+	if _, retry, reason := recoveryLeaseDecision(state, teamLeadRole, "changed-snapshot"); !retry || reason != "" {
+		t.Fatalf("changed durable evidence decision = retry %v, reason %q", retry, reason)
+	}
+	state.History = map[string]ControllerWorkerLease{}
+	for i := 0; i < config.MaxFailedSessionRetries; i++ {
+		prior := lease
+		prior.LeaseID = fmt.Sprintf("prior-%d", i)
+		prior.Intent.TaskID = fmt.Sprintf("%s-%d", agentLeadPrefix, i)
+		state.History[prior.LeaseID] = prior
+	}
+	if _, retry, reason := recoveryLeaseDecision(state, teamLeadRole, "changed-snapshot"); retry || !strings.Contains(reason, "retry attempts exhausted") {
+		t.Fatalf("exhausted changed evidence decision = retry %v, reason %q", retry, reason)
+	}
+}
+
+func TestHumanCoordinationBlockRemainsManualAfterSnapshotChange(t *testing.T) {
+	lease := ControllerWorkerLease{
+		Intent: ControllerTaskIntent{Role: teamLeadRole, TaskID: agentLeadPrefix + "old"}, LeaseID: "human", Attempt: 1,
+		Terminal: &ControllerTerminalResult{Outcome: string(sessionBlocked), Evidence: "human decision required: approve scope"},
+	}
+	state := ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{lease}}
+	if _, retry, reason := recoveryLeaseDecision(state, teamLeadRole, "changed-snapshot"); retry || !strings.Contains(reason, "coordination requires review") {
+		t.Fatalf("human decision was retried: retry %v, reason %q", retry, reason)
 	}
 }
 

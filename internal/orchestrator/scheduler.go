@@ -127,6 +127,12 @@ func recoveryLeaseDecision(state ControllerState, role, leaseID string) (Control
 		return lease, false, "Blocked: worker lease has no terminal evidence; verify worker stopped and use slopboss recover"
 	}
 	if lease.Terminal != nil && lease.Terminal.Outcome == string(sessionBlocked) && state.RetryApprovals[lease.LeaseID] == "" {
+		if role == teamLeadRole && isStaleWorkerCoordinationBlock(lease) && lease.LeaseID != leaseID {
+			if coordinationBlockRetryCount(state) <= config.MaxFailedSessionRetries {
+				return ControllerWorkerLease{}, true, ""
+			}
+			return lease, false, "Blocked: coordination retry attempts exhausted; Team Lead review required (" + lease.Terminal.Evidence + ")"
+		}
 		return lease, false, "Blocked: coordination requires review (" + lease.Terminal.Evidence + ")"
 	}
 	if lease.LeaseID != leaseID && lease.Terminal != nil {
@@ -154,6 +160,39 @@ func recoveryLeaseDecision(state ControllerState, role, leaseID string) (Control
 		return lease, false, ""
 	}
 	return lease, true, ""
+}
+
+// A worker-related blocked coordination pass can be retried when its durable
+// coordination key changes. Other blocked results may represent a human decision
+// or an ambiguous failure and remain behind the explicit recovery approval.
+func isStaleWorkerCoordinationBlock(lease ControllerWorkerLease) bool {
+	if lease.Terminal == nil || !strings.HasPrefix(lease.Intent.TaskID, agentLeadPrefix) {
+		return false
+	}
+	evidence := strings.ToLower(lease.Terminal.Evidence)
+	return strings.Contains(evidence, "transient") && strings.Contains(evidence, "worker")
+}
+
+func coordinationBlockRetryCount(state ControllerState) int {
+	count := 0
+	seen := make(map[string]bool)
+	add := func(lease ControllerWorkerLease) {
+		if seen[lease.LeaseID] || lease.Intent.Role != teamLeadRole || !isStaleWorkerCoordinationBlock(lease) {
+			return
+		}
+		seen[lease.LeaseID] = true
+		count++
+	}
+	for _, lease := range state.Leases {
+		add(lease)
+	}
+	for _, lease := range state.History {
+		add(lease)
+	}
+	for _, lease := range state.PastResults {
+		add(lease)
+	}
+	return count
 }
 
 // continuationTaskKey accepts a continuation only when it cites terminal
