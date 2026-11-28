@@ -19,7 +19,7 @@ func TestCoordinationResultDistinguishesIdleAndFailure(t *testing.T) {
 	for _, tc := range []struct {
 		status string
 		want   SessionOutcome
-	}{{"idle", sessionCompleted}, {"acted", sessionCompleted}, {"blocked", sessionBlocked}} {
+	}{{"idle", sessionCompleted}, {"acted", sessionCompleted}, {"waiting", sessionCompleted}, {"blocked", sessionBlocked}} {
 		if err := coordination.WriteReport(path, coordination.Report{Status: tc.status, Summary: "specific evidence"}); err != nil {
 			t.Fatal(err)
 		}

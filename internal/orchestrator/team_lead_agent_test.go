@@ -74,6 +74,54 @@ func TestCoordinationPersistsNoOpAndWakesOnChange(t *testing.T) {
 	}
 }
 
+func TestWaitingCoordinationWakesWhenWorkerFinishes(t *testing.T) {
+	withRetryTestState(t)
+	oldStore, oldLaunch, oldWorkspace := controllerStateStore, launchControllerSession, controllerWorkspaceExists
+	oldRunning, oldFinished, oldPending := running, finished, cancelPendingSince
+	t.Cleanup(func() {
+		controllerStateStore, launchControllerSession, controllerWorkspaceExists = oldStore, oldLaunch, oldWorkspace
+		running, finished, cancelPendingSince = oldRunning, oldFinished, oldPending
+	})
+	controllerStateStore = NewControllerStateStore(filepath.Join(t.TempDir(), "state.json"))
+	running, finished, cancelPendingSince = map[string]RunningSession{}, map[string]FinishedSession{}, map[string]time.Time{}
+	controllerWorkspaceExists = func(role string) bool { return role == teamLeadRole }
+	worker := ControllerWorkerLease{Intent: ControllerTaskIntent{Role: devAgent1Role, TaskID: "A", Branch: "agent/1/a"}, LeaseID: "worker", HeartbeatAt: time.Now(), Attempt: 1}
+	if err := controllerStateStore.Commit(ControllerState{Version: ControllerStateVersion, Leases: []ControllerWorkerLease{worker}}); err != nil {
+		t.Fatal(err)
+	}
+	launches := 0
+	var leadID, leadKey string
+	launchControllerSession = func(role string, _ board.Task, key string, _ []board.Task, id string) {
+		if role == teamLeadRole {
+			launches++
+			leadID, leadKey = id, key
+		}
+	}
+	reconcileWithMode(nil, "agent")
+	if launches != 1 {
+		t.Fatalf("initial launches = %d", launches)
+	}
+	if err := reportSessionTerminal(leadID, sessionCompleted, teamLeadRole, leadKey, "coordination waiting: worker active"); err != nil {
+		t.Fatal(err)
+	}
+	waitingID := leadID
+	reconcileWithMode(nil, "agent")
+	if launches != 1 {
+		t.Fatalf("unchanged worker relaunched coordinator %d times", launches)
+	}
+	if err := reportSessionTerminal("worker", sessionFailed, devAgent1Role, "A", "test failure"); err != nil {
+		t.Fatal(err)
+	}
+	reconcileWithMode(nil, "agent")
+	if launches != 2 {
+		t.Fatalf("finished worker did not wake coordinator: launches = %d", launches)
+	}
+	state, err := loadControllerState()
+	if err != nil || state.History[waitingID].Terminal == nil || !strings.Contains(state.History[waitingID].Terminal.Evidence, "worker active") {
+		t.Fatalf("waiting evidence not preserved: %v", err)
+	}
+}
+
 func TestCoordinationDoesNotCancelWhenSnapshotChanges(t *testing.T) {
 	withRetryTestState(t)
 	oldStore, oldRunning, oldFinished, oldPending := controllerStateStore, running, finished, cancelPendingSince

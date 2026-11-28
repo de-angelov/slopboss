@@ -13,7 +13,7 @@ var coordinationReportCmd = &cobra.Command{Use: "report", Short: "Record the out
 }}
 
 func init() {
-	coordinationReportCmd.Flags().StringVar(&coordinationStatus, "status", "", "acted, idle, or blocked")
+	coordinationReportCmd.Flags().StringVar(&coordinationStatus, "status", "", "acted, idle, waiting, or blocked")
 	coordinationReportCmd.Flags().StringVar(&coordinationSummary, "summary", "", "brief outcome or failure evidence")
 	coordinationCmd.AddCommand(coordinationReportCmd)
 	rootCmd.AddCommand(coordinationCmd)
