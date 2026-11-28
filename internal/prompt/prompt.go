@@ -19,7 +19,7 @@ import (
 // any drift between copies would silently bust the cache. It has no leading or
 // trailing newline; callers supply the surrounding whitespace.
 const TestingDisciplineRules = `- Testing discipline: prefer existing test style and user-visible/rendered assertions over inspecting React component internals.
-- Targeted test execution: during active iteration and before completion, run ONLY the specific test files covering the assigned task (for example ` + "`npx vitest run path/to/file.test.ts --reporter=basic --no-color`, `go test -run TestName ./...`, `pytest path/to/test_file.py`" + `). Your targeted tests and build are the merge gate. Do not use the full suite as a gate; run it only when needed to investigate a suspected cross-cutting regression. If it fails in an unrelated area, note the failing command and path in the task and continue; do not fix unrelated files.
+- Targeted test execution: during active iteration and before completion, run ONLY the specific test files covering the assigned task (for example ` + "`npx vitest run path/to/file.test.ts --reporter=basic --no-color`, `go test -run TestName ./...`, `pytest path/to/test_file.py`" + `). Your targeted tests and build are the merge gate. Do not use the full suite as a gate; run it only when needed to investigate a suspected cross-cutting regression. If it fails in an unrelated area, report the failing command and path to the controller, then continue; do not fix unrelated files.
 - Do not add custom test traversal helpers, mock frameworks, DOM harnesses, or new test utilities unless the ticket explicitly requires interaction behavior that cannot be covered otherwise.
 - Test contract, not implementation: assert rendered text, form fields, button labels, form ids/actions, validation messages, and preserved existing behavior.
 - Avoid asserting component prop wiring directly when the same behavior can be observed in rendered output.
@@ -27,17 +27,11 @@ const TestingDisciplineRules = `- Testing discipline: prefer existing test style
 - Scope budget: for small route/UI tickets, keep test changes close to the changed file and avoid adding more test code than implementation code unless a failing test proves it is necessary.`
 
 // DependencyInstallRules keeps dependency/network stalls from wedging a live dev
-// lane. Package-manager installs are the main long-running command agents issue
-// in greenfield repos; they must either complete, fail visibly, or turn the task
-// into a blocked board item with enough evidence for a human or later unblocker.
+// lane while leaving board lifecycle changes to the controller.
 const DependencyInstallRules = `- Dependency install discipline: run package-manager install/update commands with an explicit timeout, for example ` + "`timeout 10m npm install`, `timeout 10m pnpm install`, or the stack-equivalent command." + `
-- If an install/update times out, hangs, or shows registry/network retry errors, stop retrying blindly. Clean partial install artifacts that can poison later runs (for example incomplete node_modules or package-manager temp/cache state), capture the exact failing command/output, and mark the task Blocked in TASKS.md.
-- When package manifests change, commit the corresponding lockfile (` + "`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`, etc.)" + ` or explicitly block on the install failure that prevented generating it.
-- Do not leave package-manager install processes running in the workspace after marking a task blocked or stopping work.`
-
-// RebaseAuditRules directs dev agents to self-heal non-fast-forward push rejections
-// by rebasing, resolving zdiff3 conflicts, and verifying with git diff --check.
-const RebaseAuditRules = `- Rebase audit discipline: if push to main is rejected (non-fast-forward), do not abort or block. Run ` + "`git fetch origin <base> && git rebase origin/<base>`" + `. On conflict: list files with ` + "`git diff --name-only --diff-filter=U`" + `, resolve using the zdiff3 base context, verify zero leftover markers with ` + "`git diff --check`" + `, continue rebase, re-run tests, and push.`
+- If an install/update times out, hangs, or shows registry/network retry errors, stop retrying blindly. Clean partial install artifacts that can poison later runs (for example incomplete node_modules or package-manager temp/cache state), capture the exact failing command/output, and report the blocker to the controller.
+- When package manifests change, include the corresponding lockfile (` + "`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`, etc.)" + ` in the implementation; report an install failure that prevents generating it as a blocker.
+- Do not leave package-manager install processes running in the workspace after stopping work.`
 
 func DevAgentRuntimeInstructions() string {
 	return `
@@ -48,10 +42,10 @@ Runtime Rules:
 - The current working directory is already the assigned product repository. Do not cd into "workspaces/repo-agent-*" unless that directory exists from the current working directory.
 - Use the existing repository test stack. If a missing tool or unrelated type error blocks verification, report it instead of expanding scope.
 - File reading discipline: avoid reading entire large files (>300 lines) with unbounded reads. Locate target functions first (e.g. with grep -n) and read targeted line ranges.
-- Verification failures outside the assigned task are not blockers. Do not fix unrelated files and do not change the assigned task to Blocked; note the failing command and path in the task's progress notes, then finish when your targeted tests and build pass.
-- Blocked status is reserved for genuine human input (credentials, access, or a decision) or a dependency install that prevents all work. When blocked, record Blocked by: and a specific ask.
-- Never edit BACKLOG.md, TASKS.md, or ARCHIVE.md directly. Use the serialized Slopboss board CLI for lifecycle changes and board set TASK-ID --note for progress or blocker evidence.
-` + DependencyInstallRules + "\n" + TestingDisciplineRules + "\n" + RebaseAuditRules + "\n"
+- Verification failures outside the assigned task are not blockers. Do not fix unrelated files or change task status; report the failing command and path to the controller, then finish when your targeted tests and build pass.
+- Blocked status is reserved for genuine human input (credentials, access, or a dependency install that prevents all work). Report the specific ask and blocker evidence to the controller; do not change task status or ownership.
+- Do not edit BACKLOG.md, TASKS.md, or ARCHIVE.md or use board commands. Report progress and blocker evidence to the controller.
+` + DependencyInstallRules + "\n" + TestingDisciplineRules + "\n"
 }
 
 // ControllerManagedPrecedence makes the live workflow authoritative over legacy
