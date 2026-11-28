@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	mainCommitClaimRe = regexp.MustCompile(`(?i)\bmain\b.*\bcommit\b.*\b([0-9a-f]{7,40})\b|\bcommit\b.*\b([0-9a-f]{7,40})\b.*\bmain\b`)
-	archiveHeadingRe  = regexp.MustCompile(`^###\s+(.+)$`)
+	commitTokenRe    = regexp.MustCompile(`(?i)\b[0-9a-f]{7,40}\b`)
+	archiveHeadingRe = regexp.MustCompile(`^###\s+(.+)$`)
 
 	mainContainsCommit = git.MainContainsCommit
 )
@@ -124,13 +124,31 @@ func archivedCompletions() []archiveCompletion {
 }
 
 func mainCommitClaim(line string) string {
-	match := mainCommitClaimRe.FindStringSubmatch(line)
-	if match == nil {
+	base := regexp.QuoteMeta(config.BaseBranch)
+	if strings.TrimSpace(config.BaseBranch) == "" {
+		base = "main"
+	}
+	baseClaimRe := regexp.MustCompile(`(?i)\b(?:origin/)?` + base + `\b`)
+	bases := baseClaimRe.FindAllStringIndex(line, -1)
+	if len(bases) == 0 {
 		return ""
 	}
-	for _, group := range match[1:] {
-		if group != "" {
-			return group
+	commits := commitTokenRe.FindAllStringIndex(line, -1)
+	// A commit after the explicit base is the landed commit. This takes
+	// precedence over an earlier task-branch commit on the same line.
+	for baseIndex := len(bases) - 1; baseIndex >= 0; baseIndex-- {
+		for _, commit := range commits {
+			if commit[0] > bases[baseIndex][1] {
+				return line[commit[0]:commit[1]]
+			}
+		}
+	}
+	// Microboss notes use "landed commit HASH on origin/<base>".
+	for _, commit := range commits {
+		for _, baseIndex := range bases {
+			if commit[1] < baseIndex[0] {
+				return line[commit[0]:commit[1]]
+			}
 		}
 	}
 	return ""
